@@ -1,6 +1,7 @@
 .notes
 .build
 .deploy
+.github
 tmp
 notes
 sites/gmack.nz
