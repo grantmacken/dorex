@@ -1,0 +1,69 @@
+version: '3.4'
+services:
+  exist:
+    image: grantmacken/alpine-exist:latest
+    container_name: ex
+    hostname: exhost
+    ports:
+      - 8080:8080
+    networks:
+      - www
+    volumes:
+      - type: volume
+        source: data
+        target: ${EXIST_HOME}/${EXIST_DATA_DIR}
+  openresty:
+    image: grantmacken/alpine-openresty-dev:latest
+    container_name: or
+    hostname: orhost
+    depends_on:
+      - "exist"
+    ports:
+      - 80:80
+      - 443:443
+    environment:
+      - OPENRESTY_HOME
+      - EXIST_HOME
+      - EXIST_DATA_DIR
+      - EXIST_AUTH
+      - LETSENCRYPT
+    networks:
+      - www
+    volumes:
+      - type: volume
+        target: ${OPENRESTY_HOME}/nginx/html
+      - type: volume
+        source: conf
+        target: ${OPENRESTY_HOME}/nginx/conf
+      - type: volume
+        source: site
+        target: ${OPENRESTY_HOME}/site
+      - type: volume
+        source: letsencrypt
+        target: ${LETSENCRYPT}
+      - type: bind
+        source: ./bin
+        target: /home/bin
+      - type: bind
+        source: ./t
+        target: /home/t
+volumes:
+  data:
+    driver: local
+    name: data
+  site:
+    driver: local
+    name: site
+  conf:
+    driver: local
+    name: conf
+  html:
+    driver: local
+    name: html
+  letsencrypt:
+    driver: local
+    name: letsencrypt
+
+networks:
+  www:
+    driver: bridge

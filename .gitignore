@@ -1,0 +1,14 @@
+.notes
+.build
+.deploy
+tmp
+notes
+sites/gmack.nz
+sites/markup.nz
+proxy
+t
+bin
+Makefile
+projections.json
+.mk-inc
+.git
