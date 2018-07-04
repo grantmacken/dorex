@@ -13,7 +13,7 @@ services:
         source: data
         target: ${EXIST_HOME}/${EXIST_DATA_DIR}
   openresty:
-    image: grantmacken/alpine-openresty-dev:latest
+    image: grantmacken/alpine-openresty:dev
     container_name: or
     hostname: orhost
     depends_on:
@@ -21,14 +21,13 @@ services:
     ports:
       - 80:80
       - 443:443
+    env_file: .env
     environment:
-      - OPENRESTY_HOME
-      - EXIST_HOME
-      - EXIST_DATA_DIR
       - EXIST_AUTH
-      - LETSENCRYPT
     networks:
       - www
+    extra_hosts:
+      - zie.nz:127.0.0.1
     volumes:
       - type: volume
         target: ${OPENRESTY_HOME}/nginx/html

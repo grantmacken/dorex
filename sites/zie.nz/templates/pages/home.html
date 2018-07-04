@@ -1,8 +1,24 @@
 <html>
-  <head>
+  <head data-include="head">
     <title>home page</title>
   </head>
   <body>
-    My home page
+    <header role="banner"> My Banner </header>
+    <!-- https://www.w3.org/TR/wai-aria-practices/examples/menubar/menubar-1/menubar-1.html-->
+    <nav aria-label="Site Navigation">
+      <ul role="menubar" aria-label="Site Navigation">
+        <li><a href="" role="menuitem">Nav 1</a></li>
+      </ul>
+    </nav>
+    <main role="main">
+      <article>
+        <p>
+          In this layout, we display the areas in source order for any screen less that 500 pixels wide. 
+          We go to a two column layout, and then to a three column layout by redefining the grid, and the 
+          placement of items on the grid.</p>
+      </article> 
+      <aside>Sidebar</aside>
+    </main>
+    <footer>The footer</footer>
   </body>
 </html>
