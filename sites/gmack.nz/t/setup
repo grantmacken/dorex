@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+[ -e config ] || exit 1
+[ -e ../common.properties ] || exit 1
+[ -e ../project.properties ] || exit 1
+source <( sed 's/=/="/g' config | sed -r 's/$/"/g' )
+source ../common.properties 
+source ../project.properties
+verbose=true
+# $verbose && echo "EXIST_HOME:[ $EXIST_HOME ]"
+$verbose && echo "WEBSITE:[ $WEBSITE ]"
+# $verbose && echo "TOKEN: [ $SITE_ACCESS_TOKEN ]"
+
+TEST_MORE_PATH="${BIN_DIR}/ext/test-more-bash"
+BASHLIB="$(
+ find $TEST_MORE_PATH -type d |
+ grep -E '/(bin|lib)$' |
+ xargs -n1 printf "%s:")"
+
+PATH="$BASHLIB$PATH"
+
+source bash+ :std

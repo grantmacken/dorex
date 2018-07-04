@@ -1,0 +1,27 @@
+sudo: false
+language: node_js
+node_js:
+- iojs
+before_install:
+- echo "${TRAVIS_BRANCH}"
+- echo "${TRAVIS_PULL_REQUEST}"
+- echo "${TRAVIS_SECURE_ENV_VARS}"
+- echo "${TRAVIS_COMMIT}"
+- git fetch
+- git fetch --tags
+install:
+- true
+script:
+- true
+#before_deploy: 
+#- echo "ready?"
+#deploy:
+#  provider: releases
+#  api_key: super_secret.txt.enc
+#  file: "FILE TO UPLOAD"
+#  skip_cleanup: true
+#  on:
+#    tags: true
+#    branch: grantmacken/gmack.nz 
+#after_deploy:
+#- echo "NONE!"

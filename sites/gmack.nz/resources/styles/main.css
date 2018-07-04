@@ -1,0 +1,389 @@
+* {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  font-size: 1em;
+  font-style: normal;
+  font-weight: normal;
+  outline-offset: 0.125em;
+  text-decoration: none;
+  vertical-align: baseline;
+}
+
+html {
+  height: 100%;
+  border-collapse: collapse;
+}
+
+body {
+  overflow-x: hidden;
+  /* declare min height as window vertical height */
+  min-height: 100vh;
+  /* flex container properties */
+  display: flex;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  /* base typography */
+  font-family: -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    Roboto,
+    Oxygen,
+    Ubuntu,
+    Cantarell,
+    "Open Sans",
+    "Helvetica Neue",
+    sans-serif;
+  letter-spacing: 0;
+  font-style: normal;
+  /* font grows 1px for every 100px of viewport width*/
+  font-size: calc(16px + 0.25vw);
+  /* leading grows along with font, */
+  /* with an additional 0.1em + 0.5px per 100px of the viewport */
+  line-height: calc(1em + 0.25vw);
+
+  text-rendering: optimizeLegibility;
+  font-weight: 400;
+}
+
+/**
+ * BODY layout
+ * - HEADER
+ * - MAIN 
+ * - FOOTER
+**/
+
+/*BANNER  with fancy linear gradient background */
+
+header[role="banner"] {
+  /* box properties */
+  /* flex item properties */
+  order: 0;
+  flex-grow: 0;
+  flex-shrink: 1;
+  flex-basis: auto;
+  align-self: stretch;
+  background: linear-gradient(
+  rgba(0, 35, 153, 0.01) 50%,
+  rgba(0, 35, 153, 0.05) 50%
+  );
+  background-size: 4px 4px;
+  height: 5vh;
+  display: flex;
+  flex-direction: column;
+  flex-wrap: wrap;
+  align-items: left;
+  justify-content: center;
+  align-content: left;
+  padding-left: 1em;
+}
+
+/* MAIN    */
+
+main {
+  /* background-color: blue; 
+    border: blue  dashed 1px;*/
+  /* background-color: rgba(196, 215, 242,0.05); */
+  /* border:  rgba(196, 215, 242,0.5) dashed 1px; */
+  /* border-radius: 1em; */
+  /* line-height: 1.2; */
+
+  /* flex item properties */
+  order: 0;
+  flex-grow: 1;
+  flex-shrink: 0;
+  flex-basis: auto;
+  /* declare main a  flex container*/
+  display: flex;
+  flex-direction: column;
+  flex-wrap: wrap;
+  align-items: top;
+  justify-content: center;
+  align-content: center;
+}
+
+main > article {
+  min-width: 320px;
+  flex-basis: calc(25% - 0.75em);
+  min-height: 10vh;
+  overflow: hidden;
+  font-size: calc(16px + 0.5vw);
+  line-height: calc(1.1em + 0.5vw);
+}
+
+main > article p {
+  text-indent: 1em;
+}
+
+main  > article * + * {
+   margin-top: 1.2rem;
+ }
+
+@media only screen and (min-width: 640px) {
+  /* change main flex container as */
+  main {
+    /* declare main flex container
+  * as a row for wider screens
+  * */
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+  }
+}
+
+main > section, main > aside {
+  border: rgba(196, 215, 242, 0.5) dashed 1px;
+  border-radius: 1em;
+  padding: .5em .5em;
+  margin: .5em .5em;
+  min-height: 10vh;
+  min-width: 260px;
+  overflow: hidden;
+  background-color: rgba(196, 215, 242, 0.05);
+}
+
+main > section {
+  /* flex item properties */
+  flex-grow: 1;
+  flex-basis: auto;
+  /* declare main a flex container*/
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+}
+
+main > aside {
+  flex-grow: 0;
+  flex-basis: 25%;
+  /* declare aside as a flex container*/
+  display: flex;
+  flex-direction: row;
+}
+
+main > section > * {
+  background-color: rgba(196, 215, 242, 0.05);
+  border: rgba(196, 215, 242, 0.5) dashed 1px;
+  border-radius: 1em;
+  padding: .5em;
+  /* margin: .5rem .5rem; */
+  min-height: 10vh;
+  overflow: hidden;
+  /* flex item properties */
+  flex-grow: 1;
+  flex-shrink: 0;
+  flex-basis: calc(25% - 0.75em);
+  min-width: 260px;
+  margin-left: 1em;
+}
+
+main > section > * :nth-last-child(2):nth-child(4n) {
+  min-width: 25%;
+}
+
+/* FOOTER
+ * if direct decendent of body the pin
+*/
+ body > footer {
+  /* box properties */
+  text-align: center;
+  font-size: .8em;
+}
+
+/**
+ * TYPOGRAPY
+ *
+**/
+
+h1, h2, h3 {
+  color: #204F49;
+  font-weight: 800;
+}
+
+h1 {
+  color: rgba(0, 35, 153, 0.1);
+  font-size: 1em;
+  max-width: 100%;
+  text-align: center;
+  margin-bottom: .5em;
+  margin-top: .5em;
+  border-radius: .5em;
+}
+
+h1 > a:hover {
+  color: #0072FF;
+  background: linear-gradient(
+    rgba(0, 35, 153, .5) 50%,
+    rgba(0, 35, 153, .05) 10%
+  );
+  background-size: 4px 4px;
+  border-top: solid 1px transparent;
+  border-bottom: solid 2px transparent;
+}
+
+h2, h3 {
+  padding-left: .5em;
+  padding-right: .5em;
+}
+
+h2 {
+  margin-bottom: .5em;
+  font-size: 1.5em;
+}
+
+h3 {
+  font-size: 1.375em;
+  margin-bottom: 1em;
+}
+
+small {
+font-size: smaller;
+}
+
+
+
+/* @media only screen and (min-width: 40em) { */
+/*   h1 { */
+/*     font-size: 3.5em; */
+/*   } */
+/*   h2 { */
+/*     font-size: 1.75em; */
+/*   } */
+/* } */
+
+/**
+ * ANCHORS
+**/
+a {
+  display: inline-block;
+  color: #3A629E;
+  background-color: transparent;
+  border-radius: .25em;
+}
+/* #6BA0E0 */
+a:link, a:visited {
+  border-top: solid 1px transparent;
+  border-bottom: dotted 2px #6BA0E0;
+  text-decoration: none;
+}
+
+a:visited {
+  text-decoration: none;
+}
+
+a:hover {
+  border-top: solid 1px transparent;
+  background-color: #0072FF;
+  color: silver;
+  border-bottom: solid 2px silver;
+}
+
+.link-to-profiles {
+  margin-top: 0;
+  display: flex;
+  justify-content: space-between;
+}
+
+.link-to-profiles > a {
+  margin-top: 0;
+  /* flex item properties */
+  max-width: 3em;
+  padding-left: 1em;
+  padding-right: 1em;
+}
+
+/*
+img {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  fill: #8BB7F9;
+  stroke: blue;
+  stroke-width:1;
+}
+*/
+
+/** IMAGES
+ * stop images breaking out of box
+ *
+**/
+
+img {
+  max-width: 100%;
+}
+
+figure {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  align-content: center;
+}
+
+figure > img {
+  border-radius: 8px;
+  margin-left: .5em;
+}
+
+figure > figcaption {
+  padding: 1.25em;
+  font-size: 0.875em;
+  margin-top: 0px;
+  text-align: center;
+}
+
+
+#reply_context {
+border-left: 5px LightSlateGray solid;
+border-bottom: 1px LightSlateGray solid;
+padding-bottom: 1.5rem;
+padding-left: 1em;
+padding-right: 1em;
+background-color: Gainsboro;
+}
+
+
+article > .e-content {
+padding-top: 1.5rem;
+padding-bottom: 1.5rem;
+border-bottom: 3px LightBlue dashed;
+}
+
+#permalink {
+margin-top: 0;
+text-align: center;
+border-bottom: 3px LightBlue dashed;
+background-color: WhiteSmoke;
+padding-top: .5em;
+padding-bottom: .5em;
+}
+
+#permalink img {
+margin-left: .5em;
+margin-right: .5em;
+}
+
+
+article > footer{
+border-bottom: 3px LightSlateGray dashed;
+padding-bottom: 1.5rem;
+background-color: Gainsboro;
+}
+
+h2 {
+text-align: center;
+text-transform: uppercase;
+border-bottom: 3px LightSlateGray dashed;
+background-color: LightSlateGray;
+color: Gainsboro;
+font-size: 1.2rem;
+padding-top: .5em;
+padding-bottom: .5em;
+}
+
+.h-cite {
+ padding-left: .5em;
+ padding-right: .5em;
+}
+

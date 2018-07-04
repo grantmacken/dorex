@@ -1,0 +1,10 @@
+.github
+.logs
+.tasks
+.tmp
+Makefile
+build
+demo.json
+deploy
+issue.md
+content
