@@ -1,8 +1,5 @@
-.notes
-.build
-.deploy
-.github
-.site-access-token
+.*
+!/.gitignore
 t
 t/.site-access-token
 tmp
@@ -11,5 +8,4 @@ sites
 bin
 Makefile
 projections.json
-.mk-inc
-.git
+
