@@ -1,11 +1,8 @@
 .*
 !/.gitignore
 t
-t/.site-access-token
 tmp
 notes
 sites
 bin
 Makefile
-projections.json
-
