@@ -7,9 +7,7 @@ t
 t/.site-access-token
 tmp
 notes
-sites/gmack.nz
-sites/markup.nz
-sites/zie.nz
+sites
 bin
 Makefile
 projections.json
