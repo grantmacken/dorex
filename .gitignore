@@ -3,12 +3,13 @@
 .deploy
 .github
 .site-access-token
+t
 t/.site-access-token
 tmp
 notes
 sites/gmack.nz
 sites/markup.nz
-t
+sites/zie.nz
 bin
 Makefile
 projections.json
