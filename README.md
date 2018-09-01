@@ -32,6 +32,13 @@ so this site should be the first to get up and running
 To set the current working domain, set the 'DOMAIN' key value in .env file
 Once set, the Make commands will resolve to this domain
 
+If you change the working domain, you will need to 
+```
+make down
+make up 
+```
+
+
 ## github: 
 
 This project assumes you have 
@@ -43,8 +50,6 @@ This project assumes you have
 git config user.name
 curl -s https://api.github.com/users/$(git config user.name) | jq '.name'
 ```
-
-
 
 ### A subrepo for each domain
 

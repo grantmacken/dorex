@@ -1,0 +1,98 @@
+{
+  "*": {
+    "framework": "dorex",
+    "start":"make up",
+    "log": "t/servroot/logs/error.log"
+  },
+  "t/servroot/logs/*.log": {
+    "type": "log"
+  },
+  "README.md": {
+    "type": "note"
+  },
+  ".projections.json": {
+    "type": "projections"
+  },
+  "notes/*.md": {
+    "type": "note",
+    "skeleton": "note"
+  },
+  "sites/zie.nz/resources/styles/*.css": {
+    "type": "css"
+  },
+  "sites/zie.nz/modules/lib/*.xqm": {
+    "type": "xqlib",
+    "alternate": "sites/zie.nz/unit-tests/lib/{}.xqm"
+  },
+  "sites/zie.nz/unit-tests/lib/*.xqm": {
+    "type": "testUnit",
+    "alternate": "sites/zie.nz/modules/lib/{}.xqm"
+  },
+
+  "sites/*.xql": {
+    "type": "router",
+    "alternate": "t/sites/{}.t"
+  },
+  "t/sites/*.t": {
+    "type": "testNginx",
+    "alternate": "sites/{}.xql",
+    "skeleton": "router"
+  },
+  "proxy/conf/*.conf": {
+    "type": "conf"
+  },
+  "proxy/conf/location_*.conf": {
+    "type": "location",
+    "alternate": "t/proxy/conf/location_{}.t",
+    "prove": [
+      "ngxProve",
+      "orLog"
+    ]
+  },
+  "t/proxy/conf/location_*.t": {
+    "type": "testLocation",
+    "alternate": "proxy/conf/location_{}.conf",
+    "prove": [
+      "ngxProve",
+      "ngxLog",
+      "orLog"
+    ],
+    "skeleton": "testNginxSocket"
+  },
+  "proxy/lualib/*.lua": {
+    "type": "lualib",
+    "alternate": "t/proxy/lualib/{}.t",
+    "format": "luafmt -l 80 -i 2 {file}",
+    "linters": [
+      "luacheck"
+    ],
+    "prove": [
+      "mkLualib",
+      "ngxProve",
+      "ngxLog"
+    ],
+    "skeleton": "module",
+    "coverage": "luaCoverage t/lualib/{}.t"
+  },
+  "t/proxy/lualib/*.t": {
+    "type": "testNginx",
+    "alternate": "proxy/lualib/{}.lua",
+    "prove": [
+      "ngxProve",
+      "ngxLog"
+    ],
+    "skeleton": "testNginxSocket"
+  },
+  "bin/*": {
+    "type": "bin",
+    "alternate": "t/bin/{}.t"
+  },
+  "t/bin/*.t": {
+    "type": "testResty",
+    "alternate": "bin/{}",
+    "prove": [
+      "ngxProve"
+    ],
+    "skeleton": "testResty"
+  }
+}

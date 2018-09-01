@@ -2,11 +2,12 @@
 .build
 .deploy
 .github
+.site-access-token
+t/.site-access-token
 tmp
 notes
 sites/gmack.nz
 sites/markup.nz
-proxy
 t
 bin
 Makefile

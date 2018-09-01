@@ -13,7 +13,7 @@ services:
         source: data
         target: ${EXIST_HOME}/${EXIST_DATA_DIR}
   openresty:
-    image: grantmacken/alpine-openresty:dev
+    image: grantmacken/alpine-openresty:latest
     container_name: or
     hostname: orhost
     depends_on:
@@ -26,10 +26,9 @@ services:
       - EXIST_AUTH
     networks:
       - www
-    extra_hosts:
-      - zie.nz:127.0.0.1
     volumes:
       - type: volume
+        source: html
         target: ${OPENRESTY_HOME}/nginx/html
       - type: volume
         source: conf
@@ -46,6 +45,7 @@ services:
       - type: bind
         source: ./t
         target: /home/t
+
 volumes:
   data:
     driver: local
