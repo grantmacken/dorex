@@ -1,3 +1,0 @@
-t/mp-entry.t
-t/mp-action-delete.t
-t/mp-action-undelete.t
