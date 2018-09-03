@@ -71,11 +71,6 @@ local function handshake( sHost )
     return "SSL Handshake Completed: " .. type(shake)
 end
 
--- curl -H 'Accept: application/vnd.github.hellcat-preview+json'  https://api.github.com/orgs/eXist-db/teams
--- curl -H 'Accept: application/vnd.github.hellcat-preview+json'  https://api.github.com/repos/eXist-db/docker-existdb
---- GET /orgs/:org/
---
-
 local function reqObj( request )
   local sURL =  request['sURL']
   local sHost = http:parse_uri(sURL)[2]
