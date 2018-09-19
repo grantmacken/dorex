@@ -1,0 +1,12 @@
+version: '3.4'
+services:
+  openresty:
+    volumes:
+      - type: bind
+        source: ./bin
+        target: ${OPENRESTY_HOME}/site/bin
+      - type: bind
+        source: ./t
+        target: ${OPENRESTY_HOME}/t
+    environment:
+      - DOMAIN=${DOMAIN}
