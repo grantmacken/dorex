@@ -58,23 +58,7 @@ lua modules used
 
  - MUST support both header and form parameter methods of authentication
  - MUST support creating posts with the [h-entry] vocabulary
---]]
 
--- function string:split(delimiter)
---   local result = { }
---   local from = 1
---   local delim_from, delim_to = string.find( self, delimiter, from )
---   if delim_from == nil then return {self} end
---   while delim_from do
---     table.insert( result, string.sub( self, from , delim_from-1 ) )
---     from = delim_to + 1
---     delim_from, delim_to = string.find( self, delimiter, from )
---   end
---   table.insert( result, string.sub( self, from ) )
---   return result
--- end
-
---[[
 3.8 Error Response
 https://www.w3.org/TR/micropub/#error-response
 --]]
@@ -82,6 +66,16 @@ https://www.w3.org/TR/micropub/#error-response
 local cjson = require("cjson")
 local httpc = require("resty.http").new()
 local jwt = require("resty.jwt")
+
+local function contains(tab, val)
+  for index, value in ipairs (tab) do
+    if value == val then
+      return true
+    end
+  end
+  return false
+end
+
 
 local function requestError( status, msg ,description)
   ngx.status = status
@@ -159,7 +153,7 @@ local function isTokenValid( jwtObj )
   if scope == nil then
     return  requestError(ngx.HTTP_UNAUTHORIZED,'insufficient_scope', 'missing scope')
   end
-  -- ngx.log(ngx.INFO, 'YEP! has a scope [ ' .. scope  .. ' ] ')
+  ngx.log(ngx.INFO, 'YEP! has a scope [ ' .. scope  .. ' ] ')
 
   local issuedAt = jwtObj.payload.issued_at
   if  issuedAt == nil then
@@ -179,13 +173,18 @@ local function isTokenValid( jwtObj )
   end
   --ngx.log(ngx.INFO, 'YEP! I am the one who authorized the use of this token')
   --ngx.log(ngx.INFO, 'Check! I have the appropiate CREATE UPDATE scope')
-  if scope ~= 'create update'  then
-    return  requestError(
-      ngx.HTTP_UNAUTHORIZED,
-      'insufficient_scope',
-      ' do not have the appropiate CREATE UPDATE scope')
-  end
-  -- ngx.log(ngx.INFO, 'YEP! I have the appropiate scope: ' .. scope )
+  -- local tScope, err = require("ngx.re").split(scope,' ')
+  -- if err then
+  --   return requestError(ngx.HTTP_UNAUTHORIZED,'unauthorized', 'insufficient_scope')
+  -- end
+
+  -- if contains(tScope,'create' ) then
+  --   return  requestError(
+  --     ngx.HTTP_UNAUTHORIZED,
+  --     'insufficient_scope',
+  --     ' do not have the appropiate CREATE scope')
+  -- end
+  --  ngx.log(ngx.INFO, 'YEP! I have the appropiate scope: ' .. scope )
 
   -- I have the appropiate post scope
   -- TODO! scope is a list
@@ -198,6 +197,78 @@ local function isTokenValid( jwtObj )
   -- -- TODO!
   return true
 end
+
+local function indieLoginVerifyAuthorizationCode( )
+  -- user redirected back to my site
+  ngx.log(ngx.INFO, " - verify the authorization code with IndieLogin.com ")
+  local reqargs = require("resty.reqargs")
+  local req = require("grantmacken.req")
+  local get, post, files = reqargs()
+  if not get then
+    local msg = " failed to get response args"
+    return requestError(ngx.HTTP_UNAUTHORIZED,'unauthorized', msg )
+  end
+  -- two parameters in the query string, state and code
+  if ( type(get['scope']) ~= 'string' ) or ( type(get['code']) ~= 'string' ) then
+    local msg = " failed to get scope or code params"
+    return requestError(ngx.HTTP_UNAUTHORIZED,'unauthorized', msg )
+  end
+  local sURL =  'https://indielogin.com/auth'
+  local sHost = http:parse_uri(sURL)[2]
+  local iPort = http:parse_uri(sURL)[3]
+  local sPath = http:parse_uri(sURL)[4]
+  local sAddress, sMsg = req.getDomainAddress( sHost )
+  local sConnect =       req.connect( sAddress, iPort )
+  local sHandshake =     req.handshake( sHost )
+  local tHeaders = {}
+    tHeaders['Host'] = sHost
+    tHeaders['Content-Type'] = 'application/x-www-form-urlencoded'
+    tHeaders['Accept'] = 'application/json'
+  local tRequest = {}
+    tRequest['version'] = 1.1
+    tRequest['method'] = 'POST'
+    tRequest['path'] = sPath
+    tHeaders['query'] = {
+      ['code'] = get['state'],
+      ['redirect_uri'] = 'https://' .. ngx.var.domain .. '/_login',
+      ['client_id'] = ngx.var.domain
+    }
+    tRequest['ssl_verify'] = false
+    tRequest['headers'] = tHeaders
+  local response, err = http:request( tRequest )
+  if not response then
+     msg = "failed to complete request: ", err
+     return requestError(ngx.HTTP_UNAUTHORIZED,'unauthorized', msg )
+  end
+  ngx.log(ngx.INFO, " indielogin request response status: " .. response.status)
+  ngx.log(ngx.INFO, " indielogin request response eason: " .. response.reason)
+
+   if response.has_body then
+     body, err = response:read_body()
+     if not body then
+       msg = "failed to read body: " ..  err
+       return requestError(ngx.HTTP_UNAUTHORIZED,'unauthorized', msg )
+     end
+     --ngx.log(ngx.INFO, " - response body received and read ")
+     local args = cjson.decode(body)
+     if not args then
+       msg = "failed to decode json " ..  err
+       return requestError(ngx.HTTP_UNAUTHORIZED,'unauthorized', msg )
+     end
+     ngx.log(ngx.INFO, " - verify body decoded ")
+     local myDomain = extractDomain( args['me'] )
+     -- local clientDomain = extractDomain( args['client_id'] )
+     --ngx.log(ngx.INFO, "Am I the one who authorized the use of this token?")
+     if ngx.var.domain  ~=  myDomain  then
+       return  requestError(ngx.HTTP_UNAUTHORIZED,'insufficient_scope', 'you are not me')
+     end
+     ngx.log(ngx.INFO, 'Yep! ' .. ngx.var.domain .. ' same domain as '  .. myDomain   )
+   else
+     msg = " - failed response has no body "
+     return requestError(ngx.HTTP_UNAUTHORIZED,'unauthorized', msg )
+   end
+end
+
 
 local function verifyAtTokenEndpoint( )
   ngx.log(ngx.INFO, " Verify At Token Endpoint ")
@@ -279,6 +350,7 @@ local function verifyAtTokenEndpoint( )
 _M.extractDomain =  extractDomain
 _M.extractToken =  extractToken
 _M.isTokenValid =  isTokenValid
+_M.indieLoginVerifyAuthorizationCode = indieLoginVerifyAuthorizationCode
 
 function _M.verifyToken()
   ngx.log(ngx.INFO, "Verify Token")

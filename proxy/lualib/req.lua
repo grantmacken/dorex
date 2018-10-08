@@ -2,7 +2,49 @@ local _M = {}
 local http = require("resty.http").new()
 local util = require("grantmacken.util")
 
---- DNS Resolution
+
+--- Domain DNS Resolution
+-- @usage  Given DOMAIN Resolve IP address
+-- @return address
+-- @return message
+-- @parm   sContainerName The name of the docker container
+local function getDomainAddress( sDomain )
+  local resolver = require("resty.dns.resolver")
+  local msg
+  local r, err, answers
+  r, err = resolver:new{nameservers = {'8.8.8.8'}}
+  if not r then
+    msg = '- failed to instantiate resolver:' .. err
+    return util.requestError( ngx.HTTP_BAD_REQUEST,'bad request',msg )
+  end
+  -- ngx.log(ngx.INFO, ' - instantiated DNS resolver:')
+  answers , err = r:tcp_query(sDomain, { qtype = r.TYPE_A })
+  if not answers then
+    msg = ' - FAILED to get answer from DNS query:' .. err
+    return util.requestError( ngx.HTTP_BAD_REQUEST,'bad request',msg )
+  end
+  -- ngx.log(ngx.INFO, ' - query answered by DNS server')
+  if answers.errcode then
+    msg =  " - FAILED DNS server returned error code: " ..
+    answers.errcode ..
+    ": " ..
+    answers.errstr
+    return util.requestError( ngx.HTTP_BAD_REQUEST,'bad request',msg )
+  end
+  -- for i, ans in ipairs(answers) do
+  --   ngx.log(ngx.INFO , 'NAME: ' .. ans.name )
+  --   ngx.log(ngx.INFO , 'ADDRESS: ' .. ans.address )
+  -- end
+  if answers[1] == nil then
+    msg = 'domain ip NOT address resolved'
+    return util.requestError( ngx.HTTP_BAD_REQUEST,'bad request',msg )
+   else
+    msg = 'domain ip address resolved: ' .. answers[1].address
+    return answers[1].address , msg
+  end
+end
+
+--- Container DNS Resolution
 -- @usage  Given container name Resolve IP address of container
 -- @return address
 -- @return message
@@ -98,6 +140,7 @@ end
 
 _M.http = http
 _M.getAddress = getAddress
+_M.getDomainAddress = getDomainAddress
 _M.connect = connect
 _M.handshake = handshake
 _M.reqObj = reqObj

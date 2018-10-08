@@ -20,6 +20,7 @@ services:
       - "exist"
     environment:
       - EXIST_AUTH=${EXIST_AUTH}
+      - TLS_COMMON_NAME=${TLS_COMMON_NAME}
     ports:
       - 80:80
       - 443:443

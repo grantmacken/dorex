@@ -207,7 +207,6 @@ function _M.processRequest()
     ngx.log(ngx.INFO,  k  .. " [ " .. v .. ' ]')
  end
 
-
    local method =  util.acceptMethods({"PUT", "POST","GET" , "DELETE"})
   ngx.log(ngx.INFO, "Accepted Method [ " .. method  .. ' ]')
   if ( method == "POST" ) then

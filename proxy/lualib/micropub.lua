@@ -2,13 +2,42 @@ local _M = {}
 
 _M.version = '0.0.1'
 
-local cjson = require("cjson")
+-- local cjson = require("cjson")
 local util = require("grantmacken.util")
 local req = require("grantmacken.req")
+local reqargs = require("resty.reqargs")
+
+
+--[[
+https://www.w3.org/TR/micropub/#update
+https://www.w3.org/TR/micropub/#delete
+each action should have an associate url
+--]]
+
+local tActions = {
+ update = true,
+ delete = true,
+ undelete = true
+}
+
+--[[
+https://www.w3.org/TR/micropub/#update
+The request MUST also include a replace, add or delete property
+--]]
+local tUpdates = {
+ replace = true,
+ add = true,
+ delete = true
+}
+
+
+
+
  -- https://www.w3.org/TR/micropub/#create
  --  handle these microformat Object Types
  --  TODO!  mark true when can handle
  ---
+
 local microformatObjectTypes = {
   entry = true,
   card = false,
@@ -134,9 +163,9 @@ local function createID( k )
     slugDict:replace("count", 1)
   end
   -- TODO! comment out test
-   ngx.log(ngx.INFO,  'comment out after test' )
-   slugDict:replace("count", 1)
-   ngx.log(ngx.INFO,  'COUNT: ' .. slugDict:get("count") )
+   -- ngx.log(ngx.INFO,  'comment out after test' )
+   -- slugDict:replace("count", 1)
+   -- ngx.log(ngx.INFO,  'COUNT: ' .. slugDict:get("count") )
   -- ngx.say(slugDict:get("count"))
   -- ngx.say(slugDict:get("today"))
   return shortKindOfPost .. slugDict:get("today") .. b60Encode(slugDict:get("count"))
@@ -320,7 +349,6 @@ local function createXmlEntry( jData )
  return xmlDoc
 end
 
-
 function doPut( sID, sPath, xmlBody )
   local sAddress, sMsg = req.getAddress( 'ex' )
   ngx.log(ngx.INFO,  sMsg )
@@ -347,7 +375,7 @@ function doPut( sID, sPath, xmlBody )
   if response.reason == 'Created' then
     ngx.log(ngx.INFO, ' created entry: ' .. 'https://' .. sID  )
     ngx.log(ngx.INFO, '# EXIT ...... # ' )
-    ngx.header.location = 'https://' .. sID
+    ngx.header['Location'] = 'https://' .. sID
     ngx.exit(ngx.HTTP_CREATED)
    end
   --[[
@@ -355,7 +383,6 @@ function doPut( sID, sPath, xmlBody )
   if response.reason == 'Created' then
     ngx.log(ngx.INFO, ' created entry: ' .. 'https://' .. sID  )
     ngx.log(ngx.INFO, '# EXIT ...... # ' )
-    
     ngx.exit(ngx.HTTP_CREATED)
    end
    --]]
@@ -392,9 +419,6 @@ function sendMicropubRequest( xmlBody  )
   end
   return response
 end
-
-
-
 
 --[[
 deleting and undeleting posts
@@ -659,9 +683,9 @@ local function processGet()
       -- TODO!
       -- ngx.say('https://www.w3.org/TR/micropub/#h-source-content')
       if args['url'] then
-        local url = args['url']
-        ngx.log(ngx.INFO,  'has url: ' , url  )
-         fetchPostsDoc( url )
+        local sURL = args['url']
+        ngx.log(ngx.INFO,  'has url: ' , sURL  )
+         fetchPostsDoc( sURL )
       else
       msg = 'source must have associated url'
       return util.requestError(
@@ -705,20 +729,43 @@ function processActions( postType, args )
     property. The request MUST also include a replace, add or delete property (or any combination of these) containing
       the updates to make.
     --]]
+  ngx.log(ngx.INFO, ' - process actions ', postType )
+  -- ngx.log(ngx.INFO, args['action'] )
+  -- for key, item in pairs( args ) do
+  --    ngx.log(ngx.INFO,'key', ": ", key)
+  --    ngx.log(ngx.INFO,'value', ": ", item)
+  -- end
 
-  local action = args['action']
-  local url = args['url']
-  -- TODO! gen err if no action and or url
-  ngx.log(ngx.INFO, 'start of ACTION UPDATEs')
-  if action == 'update' then
-    -- ngx.say(action)
-    if url == nil then
-      return util.requestError(
-        ngx.HTTP_NOT_ACCEPTABLE,
-        'HTTP not acceptable',
-        'update action must have a URL')
-    end
+  local sAction = args['action']
+  local sURL = args['url']
 
+  if type( sAction ) ~= 'string' then
+    msg = " micropub should have an action item' "
+    return util.requestError(
+      ngx.HTTP_NOT_ACCEPTABLE,
+      'not accepted',
+      msg)
+  end
+
+  if type( sURL ) ~= 'string' then
+    msg = " micropub 'action' should have an associated 'url' "
+    return util.requestError(
+      ngx.HTTP_NOT_ACCEPTABLE,
+      'not accepted',
+      msg)
+  end
+  --  arg['action'] should be either 'update' or 'delete' or 'undelete'
+  local from, to, err = ngx.re.find(sAction ,"(update|delete|undelete)")
+  if not from then
+    local msg = " micropub 'action' should be either 'update' or 'delete' or 'undelete' "
+    return util.requestError(
+      ngx.HTTP_NOT_ACCEPTABLE,
+      'not accepted',
+      msg)
+  end
+  ngx.log(ngx.INFO, 'ACTION: ', sAction )
+  if sAction == 'update' then
+    ngx.log(ngx.INFO, 'start of ACTION UPDATEs')
     -- do any combination
     --[[
           The values of each property inside the replace, add or delete keys MUST be an array, even if there is only a
@@ -731,13 +778,13 @@ function processActions( postType, args )
       if type(args['replace'] ) == 'table' then
         if type(args['replace']['content']) == 'table' then
           ngx.log(ngx.INFO, "do replace content")
-          local property = 'content'
-          local item = table.concat(args['replace']['content'], " ")
+          local sProperty = 'content'
+          local sItem = table.concat(args['replace']['content'], " ")
           -- TODO! for each item
-          ngx.log(ngx.INFO, "url: " .. url)
-          ngx.log(ngx.INFO, "property: " .. property)
-          ngx.log(ngx.INFO, "item: " .. item)
-          local response = replaceProperty(url,property,item)
+          -- ngx.log(ngx.INFO, "url: " .. sURL )
+          -- ngx.log(ngx.INFO, "property: " .. sProperty)
+          -- ngx.log(ngx.INFO, "item: " .. sItem)
+          local response = replaceProperty(sURL,sProperty,sItem)
           ngx.log(ngx.INFO, "status: ", response.status)
           ngx.log(ngx.INFO,"reason: ", response.reason)
           if reason == 'OK' then
@@ -771,7 +818,7 @@ function processActions( postType, args )
           -- ngx.log(ngx.INFO, 'keyType:' .. key )
           -- ngx.log(ngx.INFO, 'property:' .. property )
           if type(property) == 'string' then
-            local response = removeProperty( url, property)
+            local response = removeProperty( sURL, property)
             ngx.log(ngx.INFO, "status: ", response.status)
             ngx.log(ngx.INFO,"reason: ", response.reason)
             reason = response.reason
@@ -779,7 +826,7 @@ function processActions( postType, args )
         elseif type(key) == 'string' then
           if type(property) == 'table' then
             for index, item in ipairs (property) do
-              ngx.log(ngx.INFO, "url: " .. url)
+              ngx.log(ngx.INFO, "url: " .. sURL)
               ngx.log(ngx.INFO, "key: " .. key)
               ngx.log(ngx.INFO, "item: " .. item)
               local response =  removePropertyItem( url, key , item )
@@ -789,7 +836,7 @@ function processActions( postType, args )
             end
             -- after we have removes properties
           elseif type(property) == 'string' then
-            ngx.log(ngx.INFO, "url: " .. url)
+            ngx.log(ngx.INFO, "url: " .. sURL)
             ngx.log(ngx.INFO, "key: " .. key)
             -- local reason =  require('grantmacken.eXist').removeProperty( url, property )
             -- if reason == 'OK' then
@@ -818,11 +865,11 @@ function processActions( postType, args )
           --  ngx.log(ngx.INFO, 'key: ' .. key )
           if type(property) == 'table' then
             for index, item in ipairs (property) do
-              ngx.log(ngx.INFO, "url: " .. url)
+              ngx.log(ngx.INFO, "url: " .. sURL)
               ngx.log(ngx.INFO, "key: " .. key)
               ngx.log(ngx.INFO, "item: " .. item)
               -- TODO  what if it fails
-              local response =  addProperty( url, key, item )
+              local response =  addProperty( sURL, key, item )
               ngx.log(ngx.INFO, "status: ", response.status)
               ngx.log(ngx.INFO,"reason: ", response.reason)
               reason = response.reason
@@ -837,11 +884,11 @@ function processActions( postType, args )
       end
     end
     -- end of ACTION UPDATEs
-  elseif action == 'delete' then
+  elseif sAction == 'delete' then
     -- start of ACTION DELETE
     ngx.log(ngx.INFO, "start of ACTION DELETE")
-    ngx.log(ngx.INFO, "URL: " .. url )
-    local response = deletePost( url )
+    ngx.log(ngx.INFO, "URL: " .. sURL )
+    local response = deletePost( sURL )
     ngx.log(ngx.INFO, "status: ", response.status)
     ngx.log(ngx.INFO,"reason: ", response.reason)
     reason = response.reason
@@ -849,9 +896,9 @@ function processActions( postType, args )
       ngx.status = ngx.HTTP_NO_CONTENT
       ngx.exit( ngx.HTTP_NO_CONTENT )
     end
-  elseif action == 'undelete' then
+  elseif sAction == 'undelete' then
     ngx.log(ngx.INFO, "start of ACTION UNDELETE")
-    local response =  undeletePost( url )
+    local response =  undeletePost( sURL )
     ngx.log(ngx.INFO, "status: ", response.status)
     ngx.log(ngx.INFO,"reason: ", response.reason)
     reason = response.reason
@@ -939,19 +986,37 @@ function processJsonTypes(args)
   end
 end
 
-
 function processJsonBody( )
   ngx.log(ngx.INFO, ' ======================' )
   ngx.log(ngx.INFO, ' process Json Body ' )
   ngx.log(ngx.INFO, ' ======================' )
-  ngx.req.read_body()
-  local args  = cjson.decode(ngx.req.get_body_data())
+  -- ngx.req.read_body()
+  local get, post, files = reqargs()
+  if not post then
+    msg = " - failed to get post body: " ..  err
+    return util.requestError(
+      ngx.HTTP_NOT_ACCEPTABLE,
+      'not accepted',
+      msg)
+  end
+  if not ( next(post)  ) then
+    msg = " - failed (json body should not be empty)"
+    return util.requestError(
+      ngx.HTTP_NOT_ACCEPTABLE,
+      'not accepted',
+      msg)
+  end
   -- either 'ACTION' to modify post or 'TYPE' to create type of post
-  if args['action'] then
-    -- ngx.say( 'action' )
-     processActions( 'json' , args)
-  elseif args['type'] then
-    processJsonTypes(args)
+  if post['action'] then
+     processActions( 'json' , post )
+  elseif post['type'] then
+     processJsonTypes(post)
+  else
+    msg = "sent json body should contain either 'action' or 'type' as keys"
+    return util.requestError(
+      ngx.HTTP_NOT_ACCEPTABLE,
+      'not accepted',
+      msg)
   end
 end
 
@@ -962,7 +1027,6 @@ local function processPostArgs()
   local msg = ''
   local args = {}
   ngx.req.read_body()
-  local reqargs = require("resty.reqargs")
   local get, post, files = reqargs(  )
   if not get then
     msg = "failed to get post args: " ..  err
@@ -1115,7 +1179,7 @@ local function processPostArgs()
       if response.reason == 'Created' then
         ngx.log(ngx.INFO, ' created entry: ' .. jData.properties.url[1] )
         ngx.log(ngx.INFO, '# EXIT ...... # ' )
-        ngx.header.location = jData.properties.url[1]
+        ngx.header['Location'] = jData.properties.url[1]
         ngx.exit(ngx.HTTP_CREATED)
       end
     end
@@ -1140,17 +1204,24 @@ function _M.processRequest()
   if method == "POST" then
       local contentType = util.acceptContentTypes({
       'application/json',
+      'application/xml',
       'application/x-www-form-urlencoded',
       'multipart/form-data'
     })
-   ngx.log( ngx.INFO, 'Accept Content Type: ' .. contentType )
-  if contentType  == 'application/x-www-form-urlencoded' then
-     processPostArgs()
-  elseif contentType  == 'multipart/form-data' then
-    -- processMultPartForm()
-  elseif contentType  == 'application/json' then
-     processJsonBody()
-  end
+    ngx.log( ngx.INFO, 'Accept Content Type: ' .. contentType )
+    if contentType  == 'application/x-www-form-urlencoded' then
+      processPostArgs()
+    elseif contentType  == 'multipart/form-data' then
+      -- processMultPartForm()
+    elseif contentType  == 'application/json' then
+      processJsonBody()
+    elseif contentType  == 'application/xml' then
+        ngx.log( ngx.INFO, 'Process: ' .. contentType )
+
+        ngx.req.read_body()
+        local data = ngx.req.get_body_data()
+        ngx.say(type(data))
+    end
   else
     processGet()
   end
