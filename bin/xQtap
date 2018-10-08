@@ -1,0 +1,130 @@
+#!/usr/bin/env resty
+if table.getn(arg) ~= 1 then
+  print(' usage: requires 1 params [ route ] ')
+  ngx.exit()
+end
+
+local ROUTE = arg[1]
+
+local sContainerName = 'ex'
+local sAddress, sMsg = require('grantmacken.resolve').getAddress( sContainerName )
+-- ngx.say( sMsg )
+
+local httpc = require("resty.http").new()
+ok, err = httpc:connect(sAddress,8080)
+if not ok then
+  ngx.say("ERR: Failed to connect ", err)
+  ngx.exit()
+end
+-- ngx.say(' - connected to '  .. sAddress ..  ' on port  8080')
+local restPath = '/exist/rest/db/apps/'
+-- ngx.say( ' - restPath'  .. restPath)
+if not os.getenv("EXIST_AUTH") then
+  ngx.exit()
+end
+local auth = 'Basic ' .. os.getenv("EXIST_AUTH")
+local xQuery = [[
+<query xmlns="http://exist.sourceforge.net/NS/exist"
+ start='1'
+ max='9999'
+ wrap="no">
+<text>
+<![CDATA[
+xquery version "3.1";
+import module namespace inspect = "http://exist-db.org/xquery/inspection";
+import module namespace test="http://exist-db.org/xquery/xqsuite"
+  at "resource:org/exist/xquery/lib/xqsuite/xqsuite.xql";
+try{
+let $route  := ']] .. ROUTE .. [['
+let $base := substring-before( $route , '/modules')
+let $domain := substring-after( $base, repo:get-root() )
+let $nl := "&#10;"
+let $space := '&#32;' (: space :)
+let $indent := $space || $space
+let $SUCCESS := $nl || 'ok' || $space
+let $FAILURE := $nl || 'not ok' || $space
+let $HASH := $nl || '#' || $space
+let $getPath := function( $pth ){
+  xs:anyURI( $base || '/' || $pth )
+  }
+let $myModule :=  inspect:inspect-module( $route )
+let $myModulePrefix := $myModule/@prefix/string()
+let $myModuleURI :=    $myModule/@uri/string()
+let $myModuleLocation :=    $myModule/@location/string()
+let $myModuleDescription := normalize-space($myModule/description/string())
+let $myModuleSee :=         normalize-space($myModule/see/string())
+let $myModuleTests :=   $getPath( $myModuleSee )
+let $testSuite := test:suite( inspect:module-functions( $myModuleTests ))
+return (
+'TAP version 13' || $nl,
+'1..' || $testSuite/testsuite[1]/@tests/string(),
+ $HASH || '   location: ' || $myModuleLocation,
+ $HASH || ' description: ' || $myModuleDescription,
+ $HASH || '  module see: ' || $myModuleSee,
+ for $node at $i in  $testSuite//testcase
+    let $counter := string($i) || $space
+    let $testCaseName  := $node/@name/string()
+    let $testCaseClass := $node/@class/string()
+    let $testOK :=
+      if( $node/failure[@message]  )then( 'failure' )
+      else if( $node/error[@message]  )then( 'error' )
+      else('success')
+  let $message := 
+      switch ($testOK)
+       case "success" return ( $SUCCESS || $counter || ' - ' || $testCaseName )
+       case "failure" return (
+          $FAILURE || $counter || ' - ' ||  $testCaseName || ' - ' || $testCaseClass ||
+          $nl || $space || '---' ||
+          $nl || $space || 'message: "' ||  $node/failure/@message/string() || '"' ||
+          $nl || $space || 'data:' ||
+          $nl || $indent || 'got:  "' ||  $node/output/string()  || '"' ||
+          $nl || $indent || 'expect: "' || $node/failure/string() || '"' ||
+          $nl || $space || '...'
+       )
+       case "error" return (
+          $FAILURE || $counter || ' - ' ||  $testCaseName || ' - ' || $testCaseClass ||
+            $HASH || 'error type: ' ||  $node/error/@type/string() ||
+            $HASH || '   message: ' || $HASH  ||  $node/error/@message/string()
+       )
+       default return ()
+   return (
+    $message
+   )
+)
+} catch * {()}
+]] ..']]>' .. [[
+</text>
+</query>
+]]
+
+ -- '      route: ' || $route || $nl ,
+ -- '     prefix:  ' || $myModulePrefix || $nl ,
+ -- '        uri: ' || $myModuleURI || $nl ,
+ -- '   location: ' || $myModuleLocation || $nl ,
+ -- ' description: ' || $myModuleDescription || $nl ,
+ -- '  module see: ' || $myModuleSee || $nl ,
+ -- 'module tests: ' || $myModuleTests || $nl,
+
+local req = {
+  version = 1.1,
+  method = "POST",
+  path = restPath,
+  headers = {
+    ["Content-Type"] =  'application/xml',
+    ["Authorization"] = auth
+  },
+  body = xQuery
+}
+local res =  httpc:request( req )
+local oBody
+if res.has_body then
+  local sBody, err = res:read_body()
+  if not sBody then
+    ngx.say("ERR: failed to read_body: ", err)
+    ngx.say(' - exiting ... '  )
+    ngx.exit()
+  end
+  if sBody ~= '' then
+    ngx.say( sBody )
+  end
+end

@@ -1,0 +1,183 @@
+#!/usr/bin/env resty
+if table.getn(arg) ~= 1 then
+  print(' usage: requires 1 params [ file ] ')
+  ngx.exit()
+end
+-- ngx.say( 'ARG: ', arg[1])
+local SRC = arg[1]
+local REG_STR = '^.+/\\K(.+)$'
+local from, to, err = ngx.re.find( SRC, REG_STR, "jo")
+if not from then
+  if err then
+    ngx.exit()
+  end
+  ngx.exit()
+end
+
+local NAME =  string.sub(SRC, from, to)
+local FILE =  '/tmp/' .. NAME
+
+REG_STR = '^domains/\\K(.+)'
+from, to, err = ngx.re.find( SRC, REG_STR, "jo")
+if not from then
+  if err then
+    ngx.exit()
+  end
+  ngx.exit()
+end
+
+local route = string.sub(SRC, from, to)
+
+REG_STR = '^(.+?)/'
+from, to, err = ngx.re.find(route, REG_STR, "jo")
+if not from then
+  if err then
+    ngx.exit()
+  end
+  ngx.exit()
+end
+
+local DOMAIN = string.sub(route, from, to-1)
+
+REG_STR = '^(.+?)/modules/\\K(.+)$'
+from, to, err = ngx.re.find(route, REG_STR, "jo")
+if not from then
+  if err then
+    ngx.exit()
+  end
+  ngx.exit()
+end
+
+PATH = string.sub(route, from, to)
+
+local MODULE_UNDER_TEST  =   'xmldb:exist:///db/apps/' .. route
+local UNIT_TESTS  =  'xmldb:exist:///db/apps/' .. DOMAIN .. '/unit-tests/' .. PATH
+-- ngx.say('DOMAIN: ' .. DOMAIN )
+-- ngx.say('MODULE_UNDER_TEST: ' .. MODULE_UNDER_TEST )
+-- ngx.say('UNIT_TESTS: ' .. UNIT_TESTS )
+
+local sContainerName = 'ex'
+local sAddress, sMsg = require('grantmacken.resolve').getAddress( sContainerName )
+ngx.log( ngx.INFO, sMsg )
+-- ngx.say( sMsg )
+local httpc = require("resty.http").new()
+ok, err = httpc:connect(sAddress,8080)
+if not ok then
+  ngx.say("ERR: Failed to connect ", err)
+  ngx.exit()
+end
+-- ngx.say(' - connected to '  .. sAddress ..  ' on port  8080')
+local restPath = '/exist/rest/db/apps'
+if not os.getenv("EXIST_AUTH") then
+  ngx.exit()
+end
+local auth = 'Basic ' .. os.getenv("EXIST_AUTH")
+local xQuery = [[
+<query xmlns="http://exist.sourceforge.net/NS/exist"
+ start='1'
+ max='9999'
+ wrap="no">
+<text>
+<![CDATA[
+xquery version "3.1";
+import module namespace inspect = "http://exist-db.org/xquery/inspection";
+import module namespace test="http://exist-db.org/xquery/xqsuite"
+  at "resource:org/exist/xquery/lib/xqsuite/xqsuite.xql";
+try{
+  let $nl := "&#10;"
+  let $space := '&#32;'
+  let $indent := $space || $space
+  let $HASH := $nl || '#' || $space
+  let $SUCCESS := $nl || 'ok' || $space
+  let $FAILURE := $nl || 'not ok' || $space
+  let $src := ']] ..  SRC .. [['
+  let $moduleUnderTest :=
+    if ( util:binary-doc-available(']] .. MODULE_UNDER_TEST .. [[') ) then (
+      ']] .. MODULE_UNDER_TEST .. [['
+      )
+    else (
+      error(xs:QName("ERROR"), " - module Under test ']] .. MODULE_UNDER_TEST .. [[' does NOT exist ")
+      )
+  let $unitTests :=
+    if ( util:binary-doc-available(']] .. UNIT_TESTS .. [[') ) then (
+      ']] .. UNIT_TESTS .. [['
+      )
+    else (
+      error(xs:QName("ERROR"), " - unit test module ']] .. UNIT_TESTS .. [[' does NOT exist ")
+      )
+
+  let $myModule :=  inspect:inspect-module( $moduleUnderTest )
+  let $myModulePrefix := $myModule/@prefix/string()
+  let $myModuleURI :=    $myModule/@uri/string()
+  let $myModuleLocation :=    $myModule/@location/string()
+  let $myModuleDescription := normalize-space($myModule/description/string())
+  let $testSuite := test:suite( inspect:module-functions( $unitTests ))
+ return (
+'TAP version 13' || $nl,
+'1..' || $testSuite/testsuite[1]/@tests/string(),
+ for $node at $i in  $testSuite//testcase
+    let $counter := string($i) || $space
+    let $testCaseName  := $node/@name/string()
+    let $testCaseClass := $node/@class/string()
+    let $testOK :=
+      if( $node/failure[@message]  )then( 'failure' )
+      else if( $node/error[@message]  )then( 'error' )
+      else('success')
+    return (
+    switch ($testOK)
+          case "success" return ( $SUCCESS || $counter || ' - ' || $testCaseName )
+          case "failure" return (
+              $FAILURE || $counter || ' - ' ||  $testCaseName || ' - ' || $testCaseClass ||
+              $nl || $space || '---' ||
+              $nl || $space || 'message: "' ||  $node/failure/@message/string() || '"' ||
+              $nl || $space || 'data:' ||
+              $nl || $indent || 'got:  "' ||  $node/output/string()  || '"' ||
+              $nl || $indent || 'expect: "' || $node/failure/string() || '"' ||
+              $nl || $space || '...',
+            $node/failure
+          )
+          case "error" return (
+              $FAILURE || $counter || ' - ' ||  $testCaseName || ' - ' || $testCaseClass ||
+                $HASH || 'error type: ' ||  $node/error/@type/string() ||
+                $HASH || '   message: ' || $HASH  ||  $node/error/@message/string()
+          )
+          default return ()
+
+    )
+ )
+
+} catch * {
+    $err:code || ': '  || $err:description || '&#10;'
+    }
+]] ..']]>' .. [[
+</text>
+</query>
+]]
+
+local req = {
+  version = 1.1,
+  method = "POST",
+  path = restPath,
+  headers = {
+    ["Content-Type"] =  'application/xml',
+    ["Authorization"] = auth
+  },
+  body = xQuery
+}
+local res =  httpc:request( req )
+local oBody
+if res.has_body then
+  local sBody, err = res:read_body()
+  if not sBody then
+    ngx.say("ERR: failed to read_body: ", err)
+    ngx.say(' - exiting ... '  )
+    ngx.exit()
+  end
+  if sBody ~= '' then
+    ngx.say( sBody )
+  end
+end
+
+ -- $HASH || '   location: ' || $myModuleLocation,
+ -- $HASH || ' description: ' || $myModuleDescription,
+ -- $HASH || '  module see: ' || $myModuleSee,

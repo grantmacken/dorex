@@ -1,0 +1,82 @@
+#!/usr/bin/env resty
+if table.getn(arg) ~= 1 then
+  print(' usage: requires 1 params [ route ] ')
+  ngx.exit()
+end
+
+local ROUTE = arg[1]
+-- route is $(DOMAIN)/$(REGISTER)
+-- where REGISTER is from app path to the restXQ file
+--  e.g. gmack.nz/modules/router.xql
+local sContainerName = 'ex'
+local sAddress, sMsg = require('grantmacken.resolve').getAddress( sContainerName )
+-- ngx.say( sMsg )
+local httpc = require("resty.http").new()
+ok, err = httpc:connect(sAddress,8080)
+if not ok then
+  ngx.say("ERR: Failed to connect ", err)
+  ngx.exit()
+end
+-- ngx.say(' - connected to '  .. sAddress ..  ' on port  8080')
+local restPath = '/exist/rest/db/apps/'
+-- ngx.say( ' - restPath: '  .. restPath)
+if os.getenv("EXIST_AUTH") ~= nil then
+  local auth = 'Basic ' .. os.getenv("EXIST_AUTH")
+else
+  ngx.exit()
+end
+
+local xQuery = [[
+<query xmlns="http://exist.sourceforge.net/NS/exist"
+ start='1'
+ max='9999'
+ wrap="no">
+<text>
+<![CDATA[
+xquery version "3.1";
+try{
+ let $nl := "&#10;"
+ let $space := '&#32;'
+ let $route  := ']] .. ROUTE .. [['
+ let $regPath := xs:anyURI( 'xmldb:exist://' || request:get-path-info() || $route )
+ let $regDoc := exrest:register-module(xs:anyURI($regPath))
+ let $seq := $regDoc//rest:identity/@local-name/string()
+ return (
+  if ( exists($seq) ) then ( string-join( $seq, " ") ) else (
+    error(xs:QName("ERROR"), " - FAILED to register: [ ']] .. ROUTE .. [[' ]")
+    )
+ )
+} catch * {(
+'error description -' || $err:description
+)}
+]] ..']]>' .. [[
+</text>
+</query>
+]]
+ -- let $regDoc := exrest:register-module(xs:anyURI(regPath))
+ -- let $seq := $regDoc//rest:identity/@local-name/string()
+ 
+local req = {
+  version = 1.1,
+  method = "POST",
+  path = restPath,
+  headers = {
+    ["Content-Type"] =  'application/xml',
+    ["Authorization"] = auth
+  },
+  body = xQuery
+}
+
+local res =  httpc:request( req )
+local oBody
+if res.has_body then
+  local sBody, err = res:read_body()
+  if not sBody then
+    ngx.say("ERR: failed to read_body: ", err)
+    ngx.say(' - exiting ... '  )
+    ngx.exit()
+  end
+  if sBody ~= '' then
+    ngx.say( sBody )
+  end
+end

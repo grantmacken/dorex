@@ -1,0 +1,282 @@
+#!/usr/bin/env resty
+local argCount = table.getn(arg)
+if argCount < 1 or argCount > 4 then
+  ngx.say(' usage: requires 1 or 3 params [ action , ( TEXT | URL)' )
+  ngx.say([[
+ config    ( get micropub capabilities )
+ create    TEXT  (? TAG )
+ delete    URL
+ undelete  URL
+ update    URL TEXT
+ tag       URL (add|rm|remove|replace) TAG 'space seperated list'
+ get       URL
+ list      ( today | last-week | last-month | last-year | all )
+
+ create is default, if no create action specified
+]])
+  ngx.exit()
+end
+
+local tActions = {
+  create = true,
+  delete = true,
+  undelete = true,
+  update = true,
+  tag = true,
+  get = true,
+  config = true
+}
+
+local tIDs = {
+  delete = true,
+  undelete = true,
+  get = true,
+  update = true,
+  tag = true
+}
+
+local sAction = nil
+local sDo = nil
+local sID = nil
+local sUID = nil
+local sText = nil
+
+if argCount == 1 then
+  if arg[1] == 'config' then
+    sAction = arg[1]
+  else 
+    sAction = 'create'
+    sText = arg[1]
+  end
+else
+  sAction = arg[1]
+end
+
+if not tActions[sAction] then
+  io.stderr:write( ' mp ERROR: no "action" verified\n')
+  ngx.exit(1)
+end
+
+if tIDs[ arg[1] ] then
+  sID   = arg[2]
+  sText = arg[3]
+end
+
+if sAction == 'tag' then
+ if arg[4] == nil then
+    sDo = 'add'
+  elseif sText == 'add' then
+     sDo = 'add'
+     sText = arg[4]
+   elseif sText == 'remove' or sText == 'rm'  then
+     sDo = 'delete'
+     sText = arg[4]
+   elseif sText == 'replace' then
+     sDo = 'replace'
+     sText = arg[4]
+  end
+end
+
+
+local function read(f)
+  local open     = io.open
+  local f, err = open(f, "rb")
+  if not f then
+    return nil, err
+  end
+  local chunk = f:read "*a"
+  f:close()
+  return chunk
+end
+
+local sDomain = os.getenv("DOMAIN")
+local rToken, err  = read('t/.' .. sDomain .. '.token')
+if not rToken then
+  ngx.say( ' - failed to get token: ', err   )
+  ngx.exit()
+end
+
+local sToken = ngx.re.gsub(rToken, "\\s",  "", "i")
+local req = require('grantmacken.req')
+local ngx_re = require('ngx.re')
+local cjson = require('cjson')
+local pretty = require "resty.prettycjson"
+
+-- local ip =   req.getAddress( sDomain )
+local sURL =  'https://' .. sDomain .. '/micropub'
+if type(sID) == 'string' then
+  sUID = 'https://' .. sDomain .. '/' ..sID
+end
+local req = require("grantmacken.req")
+local sHost = req.http:parse_uri(sURL)[2]
+local iPort = req.http:parse_uri(sURL)[3]
+local sPath = req.http:parse_uri(sURL)[4]
+
+-- NOTE local vs remote ip address
+local sAddress, sMsg = req.getAddress( 'or' )
+-- local sAddress, sMsg = req.getDomainAddress( sHost )
+
+-- common
+local sResolve = ' --resolve ' .. sHost .. ':' .. iPort .. ':' .. sAddress .. ' '
+local sAuth  = ' -H \'Authorization: Bearer ' .. sToken .. '\''
+local sWriteOut = [[
+ - connected to  [ %{remote_ip} ]
+ - request URL   [ %{url_effective} ]
+ - ssl verified  [ %{ssl_verify_result} ] ( success is zero )
+ - transfer time [ %{time_total} ]
+ ]]
+local sOutput = ' --output /dev/null '
+
+-- default to
+local sMethod = ' -X POST   '
+local sContentType  = ' -H \'Content-Type: application/json\' '
+local sData = ''
+local sBody = ''
+local tQuery = {}
+
+if sAction == 'config' then
+   sMethod = ' -G '
+   sData = ' --data-urlencode \'q=' .. sAction .. '\' '
+   sBody = 'curl -v' ..
+   sMethod ..
+   sResolve ..
+   sAuth  ..
+   sData ..
+   sURL
+elseif  sAction == 'get' then
+   sMethod = ' -G '
+   local param1 = ' --data-urlencode \'q=source\' '
+   local param2 = ' --data-urlencode \'url=' .. sID .. '\' '
+   sData =   param1  .. param2
+   sBody = 'curl -v' ..
+   sMethod ..
+   sResolve ..
+   sAuth  ..
+   sData ..
+   sURL
+elseif  sAction == 'create' then
+   local param1 = ' -d \'h=entry\' '
+   local param2 = ' -d \'content=' ..  sText  .. '\' '
+   -- ngx.say(param1)
+   -- ngx.say(param2 )
+   sData =   param1  .. param2
+   sBody = 'curl -sS -D - ' ..
+   sResolve ..
+   sAuth  ..
+  ' --write-out \'' ..  sWriteOut .. '\' ' ..
+   sOutput ..
+   sData ..
+   sURL
+elseif  sAction == 'delete' then
+   local param1 = ' -d \'action=' .. sAction ..'\' '
+   local param2 = ' -d \'url=' .. sUID .. '\' '
+   -- ngx.say(param1)
+   -- ngx.say(param2 )
+   sData =   param1  .. param2
+   sBody = 'curl -sS -D - ' ..
+   sResolve ..
+   sAuth  ..
+  ' --write-out \'' ..  sWriteOut .. '\' ' ..
+   sData ..
+   sURL
+elseif  sAction == 'undelete' then
+   local param1 = ' -d \'action=' .. sAction ..'\' '
+   local param2 = ' -d \'url=' .. sUID .. '\' '
+   -- ngx.say(param1)
+   -- ngx.say(param2 )
+   sData =   param1  .. param2
+   sBody = 'curl -sS -D - ' ..
+   sResolve ..
+   sAuth  ..
+   sData ..
+   sURL
+elseif  sAction == 'update' then
+  local tData = {
+     action = "update",
+     url = "https://" .. sDomain .. "/" .. sID ,
+     replace = {
+       content = { sText }
+     }
+   }
+  ngx.say( pretty(tData,'\n','  '))
+  sData = ' --data \'' .. cjson.encode(tData) .. '\' '
+  sBody = 'curl -sS -D - ' ..
+  sMethod ..
+  sResolve ..
+  sAuth  ..
+  sContentType ..
+  ' --write-out \'' ..  sWriteOut .. '\' ' ..
+  sData ..
+  sURL
+elseif  sAction == 'tag' then
+  local tCategory = {}
+  local res, err = ngx_re.split(sText, "[,\\s|]")
+    if err then
+      ngx.say( " - failed: ", err)
+      ngx.exit()
+    end
+    for i = 1, #res do
+      table.insert(tCategory, res[i])
+    end
+  local tData = {
+     action = "update",
+     url = "https://" .. sDomain .. "/" .. sID ,
+     [sDo] = {
+       category  =  tCategory
+     }
+   }
+  ngx.say( pretty(tData,'\n','  '))
+  sData = ' --data \'' .. cjson.encode(tData) .. '\' '
+  sBody = 'curl -sS -D - ' ..
+  sMethod ..
+  sResolve ..
+  sAuth  ..
+  sContentType ..
+  ' --write-out \'' ..  sWriteOut .. '\' ' ..
+  sData ..
+  sURL
+end
+
+-- ngx.say( sBody )
+os.execute(sBody)
+
+--ngx.say( sBody )
+ngx.exit(0)
+
+-- local tData = {
+--   action = "update",
+--   url = "https://gmack.nz/n54T1",
+--   replace = {
+--     content = {"replaced hello moon"}
+--   }
+-- }
+
+-- ngx.say( pretty(tData,'\n','  '))
+-- ngx.say( cjson.encode(tData) )
+
+-- local sMethod = ' -X POST '
+-- local sResolve = ' --resolve ' .. sHost .. ':' .. iPort .. ':' .. sAddress .. ' '
+-- local sAuth  = ' -H \'Authorization: Bearer ' .. sToken .. '\' '
+-- local sContentType  = ' -H \'Content-Type: application/json\' '
+-- local sData = ' --data \'' .. cjson.encode(tData) .. '\' '
+-- local sWriteOut = [[
+--  - connected to  [ %{remote_ip} ]
+--  - request URL   [ %{url_effective} ]
+--  - content type  [ %{content_type} ]
+--  - ssl verified  [ %{ssl_verify_result} ] ( success is zero )
+--  - transfer time [ %{time_total} ]
+--  - response code [ %{response_code} ]
+-- ]]
+--  -- ngx.say( sWriteOut )
+--  -- ' --output /dev/null' ..
+-- local sBody = 'curl -s ' ..
+--       sMethod ..
+--       sResolve ..
+--       sAuth  ..
+--       sContentType ..
+--       ' --write-out \'' ..  sWriteOut .. '\' ' ..
+--       sData ..
+--       sURL
+-- sAuth .. sContentType .. sURL
+
+

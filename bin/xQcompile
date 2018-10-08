@@ -1,0 +1,194 @@
+#!/usr/bin/env resty
+if table.getn(arg) ~= 1 then
+  print(' usage: requires 1 params [ source ] ')
+  ngx.exit()
+end
+-- ngx.say( 'ARG: ', arg[1])
+local SRC = arg[1]
+local REG_STR = '^.+/\\K(.+)$'
+local from, to, err = ngx.re.find( SRC, REG_STR, "jo")
+if not from then
+  if err then
+    ngx.exit()
+  end
+  ngx.exit()
+end
+
+local NAME =  string.sub(SRC, from, to)
+local FILE =  '/tmp/' .. NAME
+
+REG_STR = '^domains/\\K(.+)/'
+from, to, err = ngx.re.find( SRC, REG_STR, "jo")
+if not from then
+  if err then
+    ngx.exit()
+  end
+  ngx.exit()
+end
+local PATH =   string.sub(SRC, from, to-1)
+
+local sContainerName = 'ex'
+local sAddress, sMsg = require('grantmacken.resolve').getAddress( sContainerName )
+ngx.log( ngx.INFO, sMsg )
+-- ngx.say( sMsg )
+local httpc = require("resty.http").new()
+ok, err = httpc:connect(sAddress,8080)
+if not ok then
+  ngx.say("ERR: Failed to connect ", err)
+  ngx.exit()
+end
+-- ngx.say(' - connected to '  .. sAddress ..  ' on port  8080')
+local restPath = '/exist/rest/db/apps'
+
+if not os.getenv("EXIST_AUTH") then
+  ngx.exit()
+end
+local auth = 'Basic ' .. os.getenv("EXIST_AUTH")
+
+local xQuery = [[
+<query xmlns="http://exist.sourceforge.net/NS/exist"
+ start='1'
+ max='9999'
+ wrap="no">
+<text>
+<![CDATA[
+xquery version "3.1";
+try{
+  let $nl := "&#10;"
+  let $space := '&#32;'
+  let $src := ']] ..  SRC .. [['
+  let $path := ']] .. PATH .. [['
+  let $file  :=
+    if ( file:exists(']] .. FILE .. [[') ) then (']] .. FILE .. [[')
+    else (
+      error(xs:QName("ERROR"), " - file ']] .. FILE .. [[' does NOT exist ")
+      )
+  let $collection := xs:anyURI( 'xmldb:exist://' || request:get-path-info() || '/' || $path )
+  let $moduleLoadPath :=
+    if ( xmldb:collection-available($collection) ) then ($collection)
+    else (
+      error(xs:QName('ERROR'), ' - moduleLoadPath [ ' || $collection || ' ] does NOT exist ' )
+      )
+  let $compiled :=  file:read($file) =>
+                    util:compile-query($moduleLoadPath)
+ return (
+  if ( $compiled/@result/string() eq 'fail'  ) then (
+      (
+      'Error',
+      $src,
+      $compiled/error/@line,
+      $compiled/error/@column,
+      $space  || $compiled/error/text()) =>
+      string-join(':')
+      ) else ()
+ )
+} catch * {
+    $err:code || ': '  || $err:description || '&#10;'
+    }
+]] ..']]>' .. [[
+</text>
+</query>
+]]
+
+
+local req = {
+  version = 1.1,
+  method = "POST",
+  path = restPath,
+  headers = {
+    ["Content-Type"] =  'application/xml',
+    ["Authorization"] = auth
+  },
+  body = xQuery
+}
+local res =  httpc:request( req )
+local oBody
+if res.has_body then
+  local sBody, err = res:read_body()
+  if not sBody then
+    ngx.say("ERR: failed to read_body: ", err)
+    ngx.say(' - exiting ... '  )
+    ngx.exit()
+  end
+  if sBody ~= '' then
+    ngx.say( sBody )
+  end
+end
+--[[
+--]]
+-- -- let $nl := "&#10;"
+-- -- let $file  := ']] .. absFILE .. [['
+-- -- let $moduleLoadPath  := '/db/apps/]] .. relFILE .. [['
+---- let $compiled :=
+-- -- if ( file:exists($file)) then (
+-- --  util:compile-query(file:read($file),$moduleLoadPath)
+-- --  )
+-- -- else (
+-- --  )
+-- -- return(
+---- if ( $compiled/@result/string() eq 'fail'  ) then (
+-- -- ']] .. relFILE .. [[:' || $compiled
+-- --  ) else ()
+
+--local res =  httpc:request( req )
+---- ngx.say( ' - res ' .. res.status )
+
+--local oBody
+-- if res.has_body then
+--    local sBody, err = res:read_body()
+--    if not sBody then
+--      ngx.say("ERR: failed to read_body: ", err)
+--      ngx.say(' - exiting ... '  )
+--      ngx.exit()
+--    end
+--    if sBody ~= '' then
+--      -- ngx.say('INFO: has body type: : [ ' .. type( sBody ) .. ' ] ')
+--      ngx.say( sBody )
+--    end
+--  end
+
+---- system:get-module-load-path
+----[[ NOTE:
+--files are always compiled from the root dir
+----]]
+---- local cfg = require('grantmacken.config')
+---- local get = cfg.get
+---- local fs  = require('grantmacken.fs')
+---- local DOMAIN = fs.domain()
+---- local relFILE = arg[1]
+---- local absFILE = fs.realPath(relFILE)
+---- local MODULE_PATH = get('appsRoute')  .. DOMAIN .. '/' .. fs.resolveModulePath(relFILE)
+-- -- ngx.say(DOMAIN)
+-- -- ngx.say(absFILE)
+-- -- ngx.say(MODULE_PATH)
+-- -- ngx.say('----------')
+
+---- require('grantmacken.eXistRestApi').post(
+-- -- local query = [[
+---- <query xmlns="http://exist.sourceforge.net/NS/exist"
+-- -- start='1'
+-- -- max='9999'
+-- -- wrap="no">
+---- <text>
+---- <![CDATA[
+---- xquery version "3.1";
+---- try{
+---- let $file  := ']] .. absFILE .. [['
+---- let $moduleLoadPath  := ']] .. MODULE_PATH .. [['
+---- let $compiled :=resource
+-- -- if ( file:exists($file)) then (
+-- --  util:compile-query(file:read($file),$moduleLoadPath)
+-- --  )
+-- -- else (
+-- --  )
+---- return (
+---- if ( $compiled/@result/string() eq 'fail'  ) then (
+-- -- ']] .. relFILE .. [[:' || $compiled
+-- --  ) else ()
+---- )
+---- } catch * {()}
+---- ]] ..']]>' .. [[
+---- </text>
+---- </query>
+---- ]]
+

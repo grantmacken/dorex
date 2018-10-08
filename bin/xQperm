@@ -1,0 +1,80 @@
+#!/usr/bin/env resty
+if table.getn(arg) ~= 2 then
+  print(' usage: requires 2 params [ route  perm ] ')
+  ngx.exit()
+end
+
+local ROUTE = arg[1]
+local PERM = arg[2]
+-- ngx.say( ' - ROUTE ' .. ROUTE )
+-- ngx.say( ' - PERM ' .. PERM )
+local http = require("resty.http")
+local httpc = http.new()
+local resolver = require("resty.dns.resolver")
+--- docker DNS resolver: 127.0.0.11
+local r, err, ans, ok
+r, err = resolver:new{nameservers = {'127.0.0.11'}}
+if not r then
+  ngx.say("failed to instantiate resolver: ", err)
+end
+ans, err = r:query("ex.", { qtype = r.TYPE_A })
+if not ans then
+  ngx.say("failed to query: ", err)
+end
+local ok, err = httpc:connect(ans[1].address,8080)
+if not ok then
+  ngx.say("ERR: Failed to connect ", err)
+  -- ngx.exit()
+end
+-- ngx.say('connected to '  .. ans[1].address ..  ' on port  8080')
+local restPath = '/exist/rest/db/apps/'
+-- ngx.say( ' - restPath'  .. restPath)
+local auth = 'Basic ' .. os.getenv("EXIST_AUTH")
+
+local xQuery = [[
+<query xmlns="http://exist.sourceforge.net/NS/exist"
+ start='1'
+ max='9999'
+ wrap="no">
+<text>
+<![CDATA[
+xquery version "3.1";
+try{
+ let $route  := ']] .. ROUTE .. [['
+ let $perm  := ']] .. PERM .. [[' 
+ let $setPerm := 
+ if(sm:get-permissions(xs:anyURI($route))//@mode/string() eq $perm ) then ()
+ else (sm:chmod(xs:anyURI($route),$perm ))
+ return( sm:get-permissions(xs:anyURI($route))//@mode/string() )
+} catch * {()}
+]] ..']]>' .. [[
+</text>
+</query>
+]]
+
+local req = {
+  version = 1.1,
+  method = "POST",
+  path = restPath,
+  headers = {
+    ["Content-Type"] =  'application/xml',
+    ["Authorization"] = auth
+  },
+  body = xQuery
+}
+
+local res =  httpc:request( req )
+-- ngx.say( ' - res ' .. res.status )
+local oBody
+if res.has_body then
+  local sBody, err = res:read_body()
+  if not sBody then
+    ngx.say("ERR: failed to read_body: ", err)
+    ngx.say(' - exiting ... '  )
+    ngx.exit()
+  end
+  if sBody ~= '' then
+    -- ngx.say('INFO: has body type: : [ ' .. type( sBody ) .. ' ] ')
+    ngx.say( sBody )
+  end
+end

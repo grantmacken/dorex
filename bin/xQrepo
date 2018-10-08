@@ -1,0 +1,379 @@
+#!/usr/bin/env resty
+--[[
+--NOTES
+ install vs deploy
+install: downloads package into  webapp/WEB-INF/data/expathrepo/
+docker exec ex ls webapp/WEB-INF/data/expathrepo/
+deploy: deploys into  apps/dir
+deploy targets:
+ - library:       /db/system/repo
+ - applications:  /db/apps
+
+remove vs undeploy
+remove:   remove from repo
+undeploy: remove from db - call cleanup script
+--]]
+
+local argCount = table.getn(arg)
+if argCount < 1 or argCount > 2 then
+  ngx.say(' usage: requires 1 or 2 params [ action, (package)? ] ')
+  ngx.say([[
+ list     List all the installed packages
+ update   Update all the installed packages
+ upgrade  PACKAGE
+ info   PACKAGE
+ get    PACKAGE
+ remove PACKAGE
+ search (PACKAGE)?
+]])
+  ngx.exit()
+end
+
+local ACTION = arg[1]
+local PACKAGE = ''
+if arg[2] then
+ PACKAGE = arg[2]
+end
+
+local sContainerName = 'ex'
+local sAddress, sMsg = require('grantmacken.resolve').getAddress( sContainerName )
+ngx.log( ngx.INFO, sMsg )
+--ngx.say( sMsg )
+local httpc = require("resty.http").new()
+ok, err = httpc:connect(sAddress,8080)
+if not ok then
+  ngx.say("ERR: Failed to connect ", err)
+  ngx.exit()
+end
+--ngx.say(' - connected to '  .. sAddress ..  ' on port  8080')
+local restPath = '/exist/rest/db/apps/'
+-- ngx.say( ' - restPath'  .. restPath)
+if not os.getenv("EXIST_AUTH") then
+  ngx.exit()
+end
+local auth = 'Basic ' .. os.getenv("EXIST_AUTH")
+
+--[[
+ list    -  List all the installed packages
+ update  -  Update installed packages to a newer versions
+ info   PACKAGE  -  About package
+ get    PACKAGE  -  Install package
+ remove PACKAGE  -  Remove package
+ search QUERY?   -  Search for available packages
+--]]
+local URL = 'http://demo.exist-db.org/exist/apps/public-repo'
+local qStart = [[
+<query xmlns="http://exist.sourceforge.net/NS/exist"
+ start='1'
+ max='9999'
+ wrap="no">
+<text>
+<![CDATA[
+xquery version "3.1";
+declare namespace pkg = "http://expath.org/ns/pkg";
+declare namespace rpo = "http://exist-db.org/xquery/repo";
+]]
+
+local qSpacers = [[
+ let $nl := "&#10;"
+ let $tab := '&#009;'
+ let $space := '&#32;'
+ let $sep := '&#32;-&#32;'
+]]
+
+
+local bodyFromArg
+if ACTION == 'list' or ACTION == 'ls' then
+bodyFromArg = qStart ..
+[[
+try{ ]] .. qSpacers .. [[
+ return(
+ ' - list of all the installed eXist packages' || $nl,
+ ' ------------------------------------------------------------' || $nl,
+ for $app in repo:list()
+   let $docpkg :=  util:parse(util:binary-to-string(repo:get-resource($app,'expath-pkg.xml')))
+   order by $docpkg//@abbrev
+   return (
+   '[ ' || $docpkg//@abbrev/string() ||  ' ] ' || $space || 'v'   ||
+   $docpkg//@version/string() || $sep  ||
+   $docpkg//pkg:title/string() || $nl
+   ))
+ } catch * {()}
+]] ..']]>' .. [[
+</text>
+</query>
+]]
+elseif ACTION == 'search' or ACTION == 'find' then
+bodyFromArg = qStart ..
+[[
+try{ ]] .. qSpacers .. [[
+  let $query  := ']] .. PACKAGE .. [['
+  let $URL  := ']] .. URL .. [['
+  let $APPS := $URL || '/public/apps.xml?version=' || system:get-version()
+  let $doc := doc($APPS)
+  return(
+ if ( $query  eq '' ) then (
+ for $app in  $doc//app
+   order by $app/abbrev
+   return(
+      '[ ' || $app/abbrev/string() ||  ' ] ' || $space || 'v'   ||
+      $app/version/string()  || $sep  ||
+      $app/title/string() || $tab || $app/description/string() || $nl
+   ))
+ else (
+  for $app in  $doc//app
+  where $app[ abbrev[contains(lower-case(.),lower-case($query))] or title[contains(lower-case(.),lower-case($query))] ]
+  order by $app/abbrev
+  return(
+      '[ ' || $app/abbrev/string() ||  ' ] ' || $space || 'v'   ||
+      $app/version/string()  || $sep  ||
+      $app/title/string() || $tab || $app/description/string() || $nl
+   )
+   )
+   )
+} catch * {()}
+]] ..']]>' .. [[
+</text>
+</query>
+]]
+elseif ACTION == 'info' then
+bodyFromArg = qStart ..
+[[
+try{ ]] .. qSpacers .. [[
+ let $query  := ']] .. PACKAGE .. [['
+ let $pkg := for $app in repo:list()
+   let $docpkg  :=  util:parse(util:binary-to-string(repo:get-resource($app, 'expath-pkg.xml')))
+   return
+   $docpkg/pkg:package[@abbrev[. = $query] ]
+
+ let $name :=
+    if ( count( $pkg ) ne 1 ) then (
+        error(xs:QName("ERROR"), " - package '" || $query || "' NOT installed ")
+        )
+    else ( $pkg/@name )
+
+  let $repo :=  util:parse(util:binary-to-string(repo:get-resource($name , 'repo.xml')))
+  (:
+  let $rpoVersion := ( $repo//@version ) =>
+        sort('http://www.w3.org/2013/collation/UCA?numeric=yes') =>
+        reverse() => head()
+  :)
+ return(
+ ' - info about ' || $query || $nl,
+ ' ------------------------------------------------------------' || $nl,
+ ' # PACKAGE # ' || $nl,
+ '   name: [ ' || $name  || ' ]' || $nl,
+ ' abbrev: [ ' || $pkg/@abbrev || ' ]' || $nl,
+ '  title: [ ' || $pkg/pkg:title/string() || ' ]' || $nl,
+ 'version: [ ' || $pkg/@version || ' ]' || $nl,
+ ' # REPO # ' || $nl,
+ if(string-length($repo//repo:description/text()) != 0) then
+ ('description: [ ' || $repo//rpo:description/string() || ' ]' || $nl) else (),
+ if(string-length($repo//repo:target/text()) != 0) then
+ ('     target: [ ' || $repo//rpo:target/string() || ' ]' || $nl) else(),
+ if(string-length($repo//repo:type/text()) != 0) then
+ ('       type: [ ' || $repo//rpo:type/string() || ' ]' || $nl ) else () ,
+ if(string-length($repo//repo:website/text()) != 0) then
+ ('   website: [ ' || $repo//rpo:website/string() || ' ]' || $nl ) else () ,
+ ())
+} catch * {(
+$err:code || ': '  || $err:description || '&#10;'
+)}
+]] ..']]>' .. [[
+</text>
+</query>
+]]
+elseif  ACTION == 'get'  or  ACTION == 'install'   then
+bodyFromArg = qStart ..
+[[
+try{ ]] .. qSpacers .. [[
+  let $query  := ']] .. PACKAGE .. [['
+  let $URL  := ']] .. URL .. [['
+  let $APPS := $URL || '/public/apps.xml?version=' || system:get-version()
+  let $REPO :=  $URL || '/modules/find.xql'
+  let $pkg := for $app in repo:list()
+              let $docpkg  := util:parse(util:binary-to-string(repo:get-resource($app, 'expath-pkg.xml')))
+              return $docpkg/pkg:package[@abbrev[. = $query] ]
+  let $app := doc($APPS)//app[abbrev = $query]
+  let $map :=
+    if ( count( $pkg ) ne 0 ) then ((
+        error(xs:QName("ERROR"), " - package '" || $app/name/string() || "' already installed ")
+        ))
+    else (
+        let $app := doc($APPS)//app[abbrev = $query]
+        return
+        if ( $app ) then (
+           map {
+          'version' : $app/version/string(),
+          'name' : $app/name/string()
+          })
+        else (
+          error(xs:QName("ERROR"), " - package '" || $query || "' NOT available from repo server")
+          )
+      )
+return (
+  ' - install and deploy: ' || $query || $nl,
+  ' ------------------------------------------------------------' || $nl,
+  '   name: [ ' || $map('name')  || ' ]' || $nl,
+  'version: [ ' || $map('version')  || ' ]' || $nl,
+  '   repo: [ ' || $REPO || ' ]' || $nl,
+  ' ------------------------------------------------------------' || $nl,
+(
+   let $status := repo:install-and-deploy($map('name'),$map('version'),$REPO )
+   let $ok := $status instance of element()
+   return (
+     if ( $status instance of element() ) then (
+       'installed: [ ' || $query  || ' ]  - ' || $ok  || $nl ||
+       'db target: [ ' || $status//@target/string()  || ' ]'
+       )
+     else(error(xs:QName("ERROR"), " - package '" || $query || "' failed install "))
+     )
+),
+())
+} catch * {(
+
+$err:code || ': '  || $err:description || '&#10;'
+)}
+]] ..']]>' .. [[
+</text>
+</query>
+]]
+elseif ACTION == 'remove' or ACTION == 'rm' then
+bodyFromArg = qStart .. [[
+try{ ]] .. qSpacers .. [[
+  let $query  := ']] .. PACKAGE .. [['
+  let $pkg := for $app in repo:list()
+              let $docpkg  := util:parse(util:binary-to-string(repo:get-resource($app, 'expath-pkg.xml')))
+              return $docpkg/pkg:package[@abbrev[. = $query] ]
+  let $map :=
+    if ( count( $pkg ) ne 1 ) then (
+        error(xs:QName("ERROR"), " - package '" || $query || "' NOT installed ")
+        )
+    else (
+       map {
+       'name' : $pkg//@name/string(),
+       'abbrev' : $pkg//@abbrev/string(),
+       'version' : $pkg//@version/string()
+        }
+      )
+  return (
+    ' - remove: ' || $map('abbrev') || $nl,
+    ' ------------------------------------------------------------' || $nl,
+    '      name: [ ' || $map('name')  || ' ]' || $nl,
+    '   version: [ ' || $map('version')  || ' ]' || $nl,
+    ' ------------------------------------------------------------' || $nl,
+    (
+    let $ud := repo:undeploy($map('name'))
+    let $ok := string($ud instance of element())
+    return (
+  'undeployed: [ ' || $map('abbrev')  || ' ]  - ' || $ok )
+    ),$nl,
+    '  removed: [ ' || $map('abbrev')  || ' ]  - ' || repo:remove($map('name')), $nl,
+  ())
+} catch * {(
+$err:code || ': '  || $err:description || '&#10;'
+)}
+]] ..']]>' .. [[
+</text>
+</query>
+]]
+elseif ACTION == 'update' then
+bodyFromArg = qStart ..[[
+try{ ]] .. qSpacers .. [[
+  let $query  := ']] .. PACKAGE .. [['
+  let $URL  := ']] .. URL .. [['
+  let $APPS := $URL || '/public/apps.xml?version=' || system:get-version()
+  let $REPO := $URL || '/modules/find.xql'
+  let $apps :=  doc($APPS)//app
+return (
+  ' - update installed apps ' || $nl,
+  ' ------------------------------------------------------------' || $nl,
+  (
+  for $app in $apps
+    where  $app/name[ . = ( repo:list()) ] (: filter installed apps :)
+    order by $app/name
+    return (
+      let $rpoName := $app/name/string()
+      let $pkg := util:parse(util:binary-to-string(repo:get-resource($rpoName, 'expath-pkg.xml')))
+      let $map := map {
+                  'pkgVersion' : $pkg//@version/string(),
+                  'pkgAbbrev' : $pkg//@abbrev/string(),
+                  'pkgName' : $pkg//@name/string(),
+                  'rpoVersion' : $app/version/string()
+                }
+       return (
+        if ( $map('pkgVersion') lt $map('rpoVersion') ) then (
+        let $status := repo:install-and-deploy($map('pkgName'),$map('rpoVersion'),$REPO )
+        let $ok := $status instance of element()
+        return (
+          if ( $status instance of element() ) then ( 
+            ' [ ' || $map('pkgAbbrev') || ' ] v' || $map('pkgVersion') || ' v' || $map('rpoVersion'),$nl,
+            '  updated : [ ' || $map('pkgAbbrev')  || ' ]  - ' || $ok  ,$nl,
+            'db target : [ ' || $status//@target/string()  || ' ]'
+            )
+          else(error(xs:QName("ERROR"), " - package '" || $map('pkgAbbrev') || "' failed install "))
+          )
+        )
+      else( ' [ ' || $map('pkgAbbrev') || ' ] v' || $map('pkgVersion') || ' - is latest version' )
+          ) , $nl
+       )
+    )
+  )
+} catch * {(
+$err:code || ': '  || $err:description || '&#10;'
+)}
+]] ..']]>' .. [[
+</text>
+</query>
+]]
+else
+    ngx.say("ERR: failed to understand arg ")
+    ngx.say([[
+ list    List all the installed packages
+ update  Update all the installed packages
+ upgrade PACKAGE
+ info    PACKAGE
+ get     PACKAGE
+ remove  PACKAGE
+ search  QUERY
+]])
+    ngx.exit()
+end
+
+local req = {
+  version = 1.1,
+  method = "POST",
+  path = restPath,
+  headers = {
+    ["Content-Type"] =  'application/xml',
+    ["Authorization"] = auth
+  },
+  body = bodyFromArg
+}
+
+httpc:set_timeout(24000)
+local res, err =  httpc:request( req )
+if not res then
+  ngx.say("ERR: failed request: ", err)
+  ngx.say(' - exiting ... '  )
+  ngx.exit()
+end
+local oBody
+if res.has_body then
+  oBody, err = res:read_body()
+  if not oBody then
+    ngx.say("ERR: failed to read_body: ", err)
+    ngx.say(' - exiting ... '  )
+    ngx.exit()
+  end
+  if oBody ~= '' then
+    ngx.say( oBody )
+  end
+end
+-- (:
+--            $map('pkgAbbrev') || ' [ ' || $map('pkgName') || ' ]',$nl,
+--         ' | local    remote    update' ,$nl,
+--         ' [ ' || $map('pkgVersion') ||
+--         ' ] [ ' ,  $map('rpoVersion') ||
+--         ' ]'  || ' [ ' || string($compare)  ||
+--         ' ]' , :) 

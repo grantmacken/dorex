@@ -1,0 +1,135 @@
+#!/usr/bin/env resty
+if table.getn(arg) ~= 1 then
+  print(' usage: requires 1 params [ xar_file ] ')
+  ngx.exit()
+end
+
+local XAR = arg[1]
+
+local sContainerName = 'ex'
+local sAddress, sMsg = require('grantmacken.resolve').getAddress( sContainerName )
+-- ngx.log( ngx.INFO, sMsg )
+-- ngx.say( sMsg )
+local httpc = require("resty.http").new()
+ok, err = httpc:connect(sAddress,8080)
+if not ok then
+  ngx.say("ERR: Failed to connect ", err)
+  ngx.exit()
+end
+-- ngx.say(' - connected to '  .. sAddress ..  ' on port  8080')
+local restPath = '/exist/rest/db/apps/'
+-- ngx.say( ' - restPath'  .. restPath)
+if not os.getenv("EXIST_AUTH") then
+  ngx.say("ERR: Failed to get EXIST_AUTH env var")
+  ngx.exit()
+end
+local auth = 'Basic ' .. os.getenv("EXIST_AUTH")
+
+
+local xQuery = [[
+<query xmlns="http://exist.sourceforge.net/NS/exist"
+ start='1'
+ max='9999'
+ wrap="no">
+<text>
+<![CDATA[
+xquery version "3.1";
+try{
+ let $nl := "&#10;"
+ let $directory  := '/home'
+ let $collection := xs:anyURI( 'xmldb:exist://' || request:get-path-info() )
+ let $resource  := ']] .. XAR .. [['
+ let $mimeType  := 'application/expath+xar'
+ let $fsPath  :=
+    if ( file:exists($directory || '/' || $resource)) then ($directory || '/' || $resource)
+    else (
+      error(xs:QName('ERROR'), ' - file ' || $directory || '/' || $resource || ' does NOT exist ')
+      )
+ let $contents := file:read-binary($fsPath)
+ let $dbPath := xmldb:store($collection ,$resource, $contents, $mimeType)
+ let $status :=  repo:install-and-deploy-from-db( $dbPath )
+ let $remove := xmldb:remove($collection, $resource)
+ return (
+      if ( $status instance of element() ) then (
+      ' - installed into db: [ ' || $status//@target/string()  || ' ]',$nl
+      )
+    else(
+     error(xs:QName("ERROR"), " - package '" || $resource || "' failed to install ")
+      ),
+      ' - clean up temp resources on filesystem and db ', $nl,
+      ' - deleted on filesystem: [ ' || $fsPath  || ' ] - ' || file:delete($fsPath), $nl,
+      ' - removed from eXist db: [ ' || $dbPath  || ' ] - ' || not(util:binary-doc-available($dbPath))
+ )
+} catch * {(
+'error description -' || $err:description
+)}
+]] ..']]>' .. [[
+</text>
+</query>
+]]
+
+--[[
+-
+
+  let $contents := file:read($path)
+  let $status :=  repo:install-and-deploy-from-db(
+  xmldb:store($dbPath ,$xar, $contents, $mimeType))
+  )
+  let $ok := $status instance of element()
+ let $removed :=
+    if( util:binary-doc-available($dbPath) )
+    then ( xmldb:remove($route,$pattern) )
+    else (error(xs:QName("ERROR"), " - nothing to remove "))
+  return (
+    if ( $status instance of element() ) then (
+      ' - install into db: [ ' || $status//@target/string()  || ' ] - ' || $ok
+      )
+    else(error(xs:QName("ERROR"), " - package '" || $pattern || "' failed to install ")), $nl,
+      ' - clean up temp resources on filesystem and db ', $nl,
+      ' - deleted on filesystem: [ ' || $fsPath  || ' ] - ' || file:delete($fsPath), $nl,
+      ' - removed from eXist db: [ ' || $dbPath  || ' ] - ' || not(util:binary-doc-available($dbPath)), $nl
+
+
+
+
+
+ 
+ ), $nl ,
+ ' - on filesystem deleted "' || $path  || '": [ ' || file:delete($path) || ' ] ',
+ $nl, xmldb:remove( '/db',   $pattern ),
+ ' - on db deleted "/db/' || $pattern || '" [' ||
+  not(util:binary-doc-available( '/db/' || $pattern )) || ' ]'
+
+  $route || $nl,
+  $directory || $nl,
+  $pattern || $nl,
+  $mimeType || $nl,
+  $path || $nl,
+  file:exists($path)
+
+
+--]]
+
+local req = {
+  version = 1.1,
+  method = "POST",
+  path = restPath,
+  headers = {
+    ["Content-Type"] =  'application/xml',
+    ["Authorization"] = auth
+  },
+  body = xQuery
+}
+local res =  httpc:request( req )
+local oBody
+if res.has_body then
+  local sBody, err = res:read_body()
+  if not sBody then
+    ngx.say("ERR: failed to read_body: ", err)
+    ngx.say(' - exiting ... '  )
+    ngx.exit()
+  end
+  if sBody ~= '' then
+    ngx.say( sBody )
+  end
+end

@@ -1,0 +1,139 @@
+#!/usr/bin/env resty
+if table.getn(arg) ~= 1 then
+  print(' usage: requires 1 params [ source ] ')
+  ngx.exit()
+end
+
+-- ngx.say( 'ARG: ', arg[1])
+local SRC = arg[1]
+local REG_STR = '^.+/\\K(.+)$'
+local from, to, err = ngx.re.find( SRC, REG_STR, "jo")
+if not from then
+  if err then
+    ngx.exit()
+  end
+  ngx.exit()
+end
+local RESOURCE =  string.sub(SRC, from, to)
+
+local REG_STR = '^.+\\.\\K(.+)$'
+local from, to, err = ngx.re.find( RESOURCE , REG_STR, "jo")
+if not from then
+  if err then
+    ngx.exit()
+  end
+  ngx.exit()
+end
+local EXT =  string.sub(RESOURCE, from, to)
+
+if not os.getenv("DOMAIN") then
+  ngx.exit()
+end
+if not os.getenv("DOMAIN") then
+  ngx.exit()
+end
+
+local DOMAIN = os.getenv("DOMAIN")
+REG_STR = '^domains/' ..  DOMAIN .. '/\\K(.+)/'
+from, to, err = ngx.re.find( SRC, REG_STR, "jo")
+if not from then
+  if err then
+    ngx.exit()
+  end
+  ngx.exit()
+end
+local PATH =   string.sub(SRC, from, to -1 )
+local APPS =  'xmldb:exist:///db/apps'
+local COLLECTION =  APPS .. '/'  .. DOMAIN .. '/' .. PATH
+
+-- ngx.say('EXT: ' .. EXT )
+-- ngx.say('DOMAIN: ' .. DOMAIN )
+-- ngx.say('ROUTE: ' .. ROUTE )
+
+-- ngx.exit()
+-- local COLLECTION = ROUTE
+-- local RESOURCE = arg[2]
+-- local MIMETYPE = arg[3]
+-- local FILE =  '/tmp/' .. RESOURCE
+
+local http = require("resty.http")
+local httpc = http.new()
+local resolver = require("resty.dns.resolver")
+--- docker DNS resolver: 127.0.0.11
+local r, err, ans, ok
+r, err = resolver:new{nameservers = {'127.0.0.11'}}
+if not r then
+  ngx.say("failed to instantiate resolver: ", err)
+end
+ans, err = r:query("ex.", { qtype = r.TYPE_A })
+if not ans then
+  ngx.say("failed to query: ", err)
+end
+ok, err = httpc:connect(ans[1].address,8080)
+if not ok then
+  ngx.say("ERR: Failed to connect ", err)
+  -- ngx.exit()
+end
+-- ngx.say('connected to '  .. ans[1].address ..  ' on port  8080')
+local restPath = '/exist/rest/db/apps/'
+-- ngx.say( ' - restPath'  .. restPath)
+local auth = 'Basic ' .. os.getenv("EXIST_AUTH")
+local xQuery = [[
+<query xmlns="http://exist.sourceforge.net/NS/exist"
+ start='1'
+ max='9999'
+ wrap="no">
+<text>
+<![CDATA[
+xquery version "3.1";
+try{
+  let $collection  := ']] .. COLLECTION .. [['
+  let $resource  :=  ']] .. RESOURCE  .. [['
+  let $ext  :=  '.]] .. EXT  .. [['
+  let $str := $ext || ',|' || $ext || '$'
+  let $mimeType := parse-xml(file:read('mime-types.xml'))//mime-type[matches(./extensions,$str )]/@name/string()
+  let $fsPath  :=
+  if ( file:exists('/tmp/]] .. RESOURCE .. [[') ) then ('/tmp/]] .. RESOURCE .. [[')
+  else (
+    error(xs:QName("ERROR"), " - file ']] .. RESOURCE .. [[' does NOT exist ")
+    )
+  let $store  := xmldb:store($collection,$resource,?,$mimeType)
+  let $dbPath := $store(file:read($fsPath))
+  return(
+  if ( file:delete($fsPath) ) then ( $dbPath )
+  else (error(xs:QName("ERROR"), " - file ']] .. RESOURCE .. [[' does NOT exist "))
+  )
+} catch * {(
+ 'error description -' || $err:description
+)}
+]] ..']]>' .. [[
+</text>
+</query>
+]]
+
+local req = {
+  version = 1.1,
+  method = "POST",
+  path = restPath,
+  headers = {
+    ["Content-Type"] =  'application/xml',
+    ["Authorization"] = auth
+  },
+  body = xQuery
+}
+
+local res =  httpc:request( req )
+
+local oBody
+if res.has_body then
+  local sBody, err = res:read_body()
+  if not sBody then
+    ngx.say("ERR: failed to read_body: ", err)
+    ngx.say(' - exiting ... '  )
+    ngx.exit()
+  end
+  if sBody ~= '' then
+    -- ngx.say('INFO: has body type: : [ ' .. type( sBody ) .. ' ] ')
+    ngx.say( sBody )
+  end
+end
