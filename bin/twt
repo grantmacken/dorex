@@ -1,0 +1,288 @@
+#!/usr/bin/env resty
+local argCount = table.getn(arg)
+if argCount < 1 or argCount > 4 then
+  ngx.say(' usage: requires 1 or 3 params [ action , ( TEXT | URL)' )
+  ngx.say([[
+   TEXT         - given text send tweet
+   get     ID   - given ID show tweet
+   delete  ID   - given ID destroy tweet
+   like    ID   - given id of some tweet, send like
+   unlike  ID   - given id of some tweet, destroy liked tweet
+   retweet ID   - given id of some tweet, retweet tweet
+   unretweet ID - given id of some tweet, destroy retweeted tweet
+   retweets (of me) - get people who have retweets of my tweets
+   likes  (my likes) - get my likes
+   oembed ID
+   TODO! retweeters ID  ( id of someone elses tweet )
+    ]])
+  ngx.exit()
+end
+
+local cjson = require('cjson')
+local req = require("grantmacken.req")
+local pretty = require "resty.prettycjson"
+
+local function read(f)
+  local open     = io.open
+  local f, err = open(f, "rb")
+  if not f then
+    return nil, err
+  end
+  local chunk = f:read "*a"
+  f:close()
+  return chunk
+end
+
+local twtResource
+local twtMethod = 'POST'
+local sDomain = os.getenv("DOMAIN")
+local sExAuth = os.getenv("EXIST_AUTH")
+local jTwtAuth, err  = read('t/.twitter.json')
+if not jTwtAuth then
+  ngx.say( ' - failed to get json file: ', err   )
+  ngx.exit()
+end
+
+tTwtAuth = cjson.decode(jTwtAuth)
+local sOwner = tTwtAuth.owner
+
+
+local twtAction
+if argCount == 1 then
+  if arg[1] == 'likes' then
+    twtAction = arg[1]
+  elseif  arg[1] == 'retweets' then
+    twtAction = arg[1]
+  else
+    twtAction =  'tweet'
+  end
+else
+  twtAction = arg[1]
+end
+
+local twtQuery = {}
+if twtAction  == 'tweet' then
+  twtResource = 'https://api.twitter.com/1.1/statuses/update.json'
+  twtQuery['status'] = arg[1]
+elseif twtAction == 'show' then
+  twtMethod = 'GET'
+  twtResource = 'https://api.twitter.com/1.1/statuses/show.json'
+  if not arg[2] then
+    ngx.say('FAILED arg' )
+    ngx.exit()
+  else
+    twtQuery['id'] = arg[2]
+  end
+elseif twtAction == 'delete' then
+  twtResource = 'https://api.twitter.com/1.1/statuses/destroy.json'
+  if not arg[2] then
+    ngx.say('FAILED arg' )
+    ngx.exit()
+  else
+    twtQuery['id'] = arg[2]
+  end
+elseif twtAction == 'like' then
+  twtResource = 'https://api.twitter.com/1.1/favorites/create.json'
+  if not arg[2] then
+    ngx.say('FAILED arg' )
+    ngx.exit()
+  else
+    twtQuery['id'] = arg[2]
+  end
+elseif twtAction == 'unlike' then
+  twtResource = 'https://api.twitter.com/1.1/favorites/destroy.json'
+  if not arg[2] then
+    ngx.say('FAILED arg' )
+    ngx.exit()
+  else
+    twtQuery['id'] = arg[2]
+  end
+elseif twtAction == 'likes' then
+  twtMethod = 'GET'
+  twtResource = 'https://api.twitter.com/1.1/favorites/likes.json'
+  twtQuery['count'] = 50
+elseif twtAction == 'retweet' then
+  twtResource = 'https://api.twitter.com/1.1/statuses/retweet.json'
+  twtAction = arg[1]
+  if not arg[2] then
+    ngx.say('FAILED arg' )
+    ngx.exit()
+  else
+    twtQuery['id'] = arg[2]
+  end
+elseif twtAction == 'unretweet' then
+  twtResource = 'https://api.twitter.com/1.1/statuses/unretweet.json'
+  twtAction = arg[1]
+  if not arg[2] then
+    ngx.say('FAILED arg' )
+    ngx.exit()
+  else
+    twtQuery['id'] = arg[2]
+  end
+elseif twtAction == 'retweets' then
+  twtMethod = 'GET'
+  twtResource = 'https://api.twitter.com/1.1/statuses/retweets_of_me.json'
+  twtQuery['count'] = 50
+elseif twtAction == 'oembed' then
+  twtMethod = 'GET'
+  twtResource = 'https://publish.twitter.com/oembed'
+  twtAction = arg[1]
+  if not arg[2] then
+    ngx.say('FAILED arg' )
+    ngx.exit()
+  else
+    twtQuery['url'] =  'https://twitter.com/'  ..  sOwner .. '/status/' .. arg[2]
+  end
+else
+  ngx.say('FAILED arg' )
+  ngx.exit()
+end
+-- ngx.say(cjson.encode(twtQuery))
+-- ngx.exit()
+
+local twtHost = req.http:parse_uri(twtResource)[2]
+local twtPort = req.http:parse_uri(twtResource)[3]
+local twtPath = req.http:parse_uri(twtResource)[4]
+
+-- ngx.say(twtHost)
+-- ngx.say(twtPort)
+-- ngx.say(twtPath)
+-- ngx.say(sTwtAddress)
+
+
+
+-- ngx.say(sExAddress)
+-- ngx.say(sOrAddress)
+-- ngx.say(sTwtAddress)
+-- ngx.say(pretty(tTwtAuth))
+-- ngx.say( sOwner )
+-- ngx.exit()
+
+local sExAddress, sExMsg = req.getAddress( 'ex' )
+local sURL =  'http://' .. sExAddress .. ':8080/exist/rest/db/apps/' .. sDomain .. '/modules/lib'
+local sHost = req.http:parse_uri(sURL)[2]
+local iPort = req.http:parse_uri(sURL)[3]
+local sConnect = req.connect( sExAddress, iPort )
+local sPath = req.http:parse_uri(sURL)[4]
+local sLib = 'xmldb:exist:///db/apps/' .. sDomain .. '/modules/lib/oAuth.xqm'
+
+-- ngx.say( sConnect )
+
+--[[
+6 map keys:  method, resource plus twitter credential keys:
+1. method : ( POST | GET | DELETE )
+2. resource: twitter resource url : https://api.twitter.com/1.1/statuses/update.json
+3. oauth_consumer_key
+4. oauth_consumer_secret
+5. oauth_token_secret
+6. oauth_token
+
+qMap any URL query params into key, value pairs as xQuery map
+eg map { 'status': 'hi de hi' }
+--]]
+
+local xQuery = [[
+<query xmlns="http://exist.sourceforge.net/NS/exist"
+ start='1'
+ max='9999'
+ wrap="no">
+<text>
+<![CDATA[
+xquery version "3.1";
+import module namespace oAuth="http://markup.nz/#oAuth" at "]] .. sLib .. [[";
+try{
+ let $nl := "&#10;"
+ let $map :=  map {
+    'method' : ']] .. twtMethod  .. [[',
+    'resource' : ']] .. twtResource  .. [[',
+    'oauth_consumer_key' : ']] .. tTwtAuth.oauth_consumer_key  .. [[',
+    'oauth_consumer_secret' : ']] .. tTwtAuth.oauth_consumer_secret .. [[',
+    'oauth_token_secret' : ']] .. tTwtAuth.oauth_token_secret .. [[',
+    'oauth_token' : ']] .. tTwtAuth.oauth_token .. [['
+    }
+  let $qMap := map ]] .. cjson.encode(twtQuery) .. [[
+
+ return(
+ oAuth:authorizationHeader( $map, $qMap )
+ )
+} catch * {()}
+]] ..']]>' .. [[
+</text>
+</query>
+]]
+
+local tHeaders = {}
+tHeaders["Authorization"]  = 'Basic ' .. sExAuth
+tHeaders['Content-Type'] = 'application/xml'
+tHeaders['Accept'] = 'text/plain'
+local tRequest = {
+  method = 'POST',
+  path = sPath,
+  headers = tHeaders,
+  body = xQuery
+}
+req.http:set_timeout(3000)
+local response, err = req.http:request( tRequest )
+if not response then
+  ngx.log(ngx.ERR, ' - FAILED to get response: ' .. err)
+end
+local rBody
+if response.has_body then
+  rBody, err = response:read_body()
+  if not rBody then
+    ngx.log(ngx.ERR, 'FAILED to get read body: ' .. err)
+    ngx.exit()
+  end
+end
+local closed, err = req.http:close()
+if not closed then
+  ngx.log(ngx.ERR, ' - FAILED to get close: ' .. err)
+end
+
+
+local tHeaders = {}
+tHeaders["Authorization"]  = rBody
+tHeaders['Content-Type'] = 'application/x-www-form-urlencoded'
+tHeaders['Accept'] = 'application/javascript'
+tHeaders['Host'] = twtHost
+local tRequest = {
+  version = 1.1,
+  method = twtMethod,
+  path = twtPath,
+  headers = tHeaders,
+  query = twtQuery
+}
+
+ngx.say( pretty(tRequest) )
+
+local sAddress, sMsg = req.getAddress(twtHost)
+local sConnect = req.connect( sAddress, twtPort )
+local sHandshake = req.handshake( twtHost  )
+ngx.say( sConnect )
+ngx.say( sHandshake )
+req.http:set_timeout(3000)
+local response, err = req.http:request( tRequest )
+if not response then
+  ngx.log(ngx.ERR, ' - FAILED to get response: ' .. err)
+end
+local twtResBody
+if response.has_body then
+  twtResBody, err = response:read_body()
+  if not twtResBody then
+    ngx.log(ngx.ERR, 'FAILED to get read body: ' .. err)
+    ngx.exit()
+  end
+end
+local closed, err = req.http:close()
+if not closed then
+  ngx.log(ngx.ERR, ' - FAILED to get close: ' .. err)
+end
+
+local oTwt = cjson.decode(twtResBody)
+ngx.say(pretty( oTwt,'\n','  ' ) )
+
+if type(oTwt.id_str) == 'string' then
+  ngx.say(oTwt.id_str)
+end
+
+-- ngx.say(twtResBody)
