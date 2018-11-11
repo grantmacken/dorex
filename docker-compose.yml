@@ -1,17 +1,18 @@
-version: '3.4'
+version: '3.7'
 services:
   exist:
     image: ${EXIST_IMAGE}:${EXIST_TAG}
     container_name: ex
-    hostname: exhost
+    hostname: exDev
     ports:
       - 8080:8080
-    networks:
-      - www
     volumes:
       - type: volume
         source: data
         target: ${EXIST_HOME}/${EXIST_DATA_DIR}
+    secrets:
+      - gmack_nz_access_token
+      - gmack_nz_twitter_credentials
   openresty:
     image: ${OPENRESTY_IMAGE}:${OPENRESTY_TAG}
     container_name: or
@@ -24,8 +25,6 @@ services:
     ports:
       - 80:80
       - 443:443
-    networks:
-      - www
     volumes:
       - type: volume
         source: html
@@ -39,6 +38,8 @@ services:
       - type: volume
         source: letsencrypt
         target: ${LETSENCRYPT}
+    secrets:
+      - gmack_nz_access_token
 volumes:
   data:
     driver: local
@@ -55,6 +56,9 @@ volumes:
   letsencrypt:
     driver: local
     name: letsencrypt
-networks:
-  www:
-    driver: bridge
+secrets:
+  gmack_nz_access_token:
+    file: ./secrets/gmack_nz_access_token
+  gmack_nz_twitter_credentials:
+    file: ./secrets/gmack_nz_twitter_credentials
+
