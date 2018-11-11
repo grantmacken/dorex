@@ -1103,15 +1103,14 @@ local function processPostArgs()
       --    -- tasks depends on type of post
       local xmlEntry = createXmlEntry(jData)
       local uID = jData.properties.uid[1]
-      ngx.log(ngx.INFO,  xmlEntry )
-      ngx.log(ngx.INFO,  uID )
+      -- ngx.log(ngx.INFO,  xmlEntry )
+      -- ngx.log(ngx.INFO,  uID )
       local sAddress, sMsg = req.getAddress( 'ex' )
       -- ngx.log(ngx.INFO,  sMsg )
       local sConnect = req.connect( sAddress, 8080 )
       -- ngx.log(ngx.INFO,  sConnect )
       -- ngx.log(ngx.INFO, sPath )
       local sAuth = 'Basic ' .. ngx.var.exAuth
-      -- ngx.log(ngx.INFO, auth )
       local tHeaders = {}
       tHeaders["Content-Type"] =  'application/xml'
       tHeaders["Authorization"] =  sAuth
@@ -1129,19 +1128,17 @@ local function processPostArgs()
       if not response then
         ngx.log(ngx.ERR, ' - FAILED to get response: ' .. err)
       end
-      ngx.log(ngx.INFO, " - Response Status: " .. response.status)
-      ngx.log(ngx.INFO, " - Response Reason: " .. response.reason)
-      -- for k,v in pairs(response.headers) do
-      --   ngx.log( ngx.INFO,  k " " .. v )
-      -- end
-      -- if response.has_body then
-      --   body, err = response:read_body()
-      --   if not body then
-      --     ngx.log(ngx.ERR, 'FAILED to get read body: ' .. err)
-      --   else
-      --     ngx.log( body )
-      --   end
-      -- end
+
+      if response.status > 201 then
+        ngx.log(ngx.ERR, ' - FAILED response error')
+        ngx.log(ngx.INFO, " - Response Status: " .. response.status)
+        ngx.log(ngx.INFO, " - Response Reason: " .. response.reason)
+        msg = 'PUT failed: ' .. response.reason
+        return util.requestError(
+        ngx.HTTP_NOT_ACCEPTABLE,
+        'not accepted',
+        msg )
+      end
       if kindOfPost == 'reply' then
         ngx.log(ngx.INFO,  kindOfPost  ..  ' additional tasks ' )
         -- my page
@@ -1169,10 +1166,6 @@ local function processPostArgs()
           ngx.log(ngx.INFO, 'Syndicate Elsewhere ' .. elsewhere )
           ngx.log(ngx.INFO, ' content ' ..  args['content'] )
           require('grantmacken.syndicate').syndicateToTwitter( args['content'] )
-          -- jData.properties['in-reply-to'][1]
-
-          -- require('grantmacken.syndicate').syndicateToTwitter( post[] )
-          --local tweet = require('grantmacken.syndicate').syndicateToTwitter( jData )
         end
       end
       -- Finally
@@ -1195,7 +1188,6 @@ local function processPostArgs()
     msg )
   end
 end
-
 
 function _M.processRequest()
   ngx.log( ngx.INFO, 'Process Request for '  .. ngx.var.domain )
