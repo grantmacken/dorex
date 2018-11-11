@@ -6,3 +6,4 @@ notes
 Makefile
 hint-report
 secrets/*
+domains/*/_*
