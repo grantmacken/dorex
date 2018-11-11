@@ -1,0 +1,127 @@
+#!/usr/bin/env resty
+local argCount = table.getn(arg)
+if argCount < 1 or argCount > 2 then
+  ngx.say(' usage: requires 1 param [ docs | media ] ' )
+  ngx.say([[
+ export   export data for domain to host tmp dir
+ restore  restore data for domain from tmp dir
+ -----------------------------------------------
+ Notes
+ expects $DOMAIN  as env var
+]])
+  ngx.exit()
+end
+
+local sAction = nil
+local sWhat = arg[1]
+if argCount == 2 then
+  if (arg[1] == 'export') or
+     (arg[1] == 'import') or
+     (arg[1] == 'remove')
+     then
+    sAction = arg[1]
+    sWhat = arg[2]
+  else
+    ngx.say( 'ERROR: no "action" verified')
+    ngx.exit()
+  end
+else
+   sAction = 'export'
+   sWhat = arg[1]
+end
+
+ ngx.say(' action: ', sAction )
+if sWhat == 'docs' then
+    ngx.say('   what: ', sWhat )
+  elseif sWhat == 'export' then
+    ngx.say('   what: ', sWhat )
+  elseif sWhat == 'remove' then
+    ngx.say('   what: ', sWhat )
+  else
+    ngx.say( 'ERROR: no "what" verified')
+    ngx.exit()
+end
+
+local req = require('grantmacken.req')
+local sContainerName = 'ex'
+local sDomain = os.getenv("DOMAIN")
+local sAuth = os.getenv("EXIST_AUTH")
+local sAddress, sMsg = req.getAddress( sContainerName )
+local sURL =  'http://' .. sAddress .. ':8080/exist/rest/db/data/' .. sDomain  .. '/' .. sWhat
+local sHost = req.http:parse_uri(sURL)[2]
+local iPort = req.http:parse_uri(sURL)[3]
+local sPath = req.http:parse_uri(sURL)[4]
+local sConnect = req.connect( sAddress, iPort )
+
+if sAction == 'export' then
+ sAction = 'file:sync($collection, $directory, ())'
+elseif sAction == 'remove' then
+ sAction = 'xmldb:remove($collection)'
+else
+ sAction = 'xmldb:store-files-from-pattern($collection, $directory, "**/*","application/xml",true())'
+end
+
+local xQuery = [[
+<query xmlns="http://exist.sourceforge.net/NS/exist"
+ start='1'
+ max='9999'
+ wrap="no">
+<text>
+<![CDATA[
+xquery version "3.1";
+try{
+let $nl := "&#10;"
+let $collection := request:get-path-info()
+let $directory := '/tmp' || $collection
+return (
+if ( file:exists($directory) ) then () else ( file:mkdirs($directory) ), $nl,
+'collection:' || $collection, $nl,
+'directory:' || $directory, $nl,
+]] .. sAction ..
+[[
+)} catch * {
+   'ERR:' || $err:code || ': '  || $err:description
+}
+]] ..']]>' .. [[
+</text>
+</query>
+]]
+
+local tHeaders = {}
+tHeaders["Authorization"]  = 'Basic ' .. sAuth
+tHeaders['Content-Type'] = 'application/xml'
+tHeaders ["Host"] =  sDomain
+tHeaders['Accept'] = 'text/plain'
+
+local tRequest = {
+  version = 1.1,
+  method = "POST",
+  path = sPath,
+  headers = tHeaders,
+  body = xQuery
+}
+
+req.http:set_timeout(9000)
+local response, err = req.http:request( tRequest )
+if not response then
+  ngx.say(' - ERR: failed to get response: ' .. err)
+  ngx.say(' - exiting ... '  )
+  ngx.exit()
+end
+
+local rBody
+if response.has_body then
+  rBody, err = response:read_body()
+  if not rBody then
+    ngx.say("ERR: failed to read_body: ", err)
+    ngx.exit()
+  end
+end
+
+local closed, err = req.http:close()
+if not closed then
+    ngx.say("ERR: failed to close connection: ", err)
+    ngx.exit()
+end
+
+ngx.say( rBody )

@@ -13,6 +13,9 @@ if argCount < 1 or argCount > 4 then
    retweets (of me) - get people who have retweets of my tweets
    likes  (my likes) - get my likes
    oembed ID
+   tweets   - my recent Tweets
+   feed     - 10 latest twitter updates
+   mentions - my twitter timeline
    TODO! retweeters ID  ( id of someone elses tweet )
     ]])
   ngx.exit()
@@ -33,6 +36,7 @@ local function read(f)
   return chunk
 end
 
+local twtTime = "([\\w]{3})\\s([\\w]{3})\\s([\\d]{1,2})\\s([\\d]{2}:[\\d]{2}:[\\d]{2})\\s(.+)\\s([\\d]{4})"
 local twtResource
 local twtMethod = 'POST'
 local sDomain = os.getenv("DOMAIN")
@@ -46,12 +50,26 @@ end
 tTwtAuth = cjson.decode(jTwtAuth)
 local sOwner = tTwtAuth.owner
 
+local oneOpt = {
+  likes = true,
+  retweets = true,
+  tweets = true,
+  feed = true,
+  mentions = true
+}
+
+local isArray = {
+  likes = true,
+  retweets = true,
+  tweets = true,
+  feed = true,
+  mentions = true
+}
+
 
 local twtAction
 if argCount == 1 then
-  if arg[1] == 'likes' then
-    twtAction = arg[1]
-  elseif  arg[1] == 'retweets' then
+  if oneOpt[arg[1]] then
     twtAction = arg[1]
   else
     twtAction =  'tweet'
@@ -64,6 +82,16 @@ local twtQuery = {}
 if twtAction  == 'tweet' then
   twtResource = 'https://api.twitter.com/1.1/statuses/update.json'
   twtQuery['status'] = arg[1]
+elseif twtAction == 'tweets' then
+  twtMethod = 'GET'
+  twtResource = 'https://api.twitter.com/1.1/statuses/user_timeline.json'
+  twtQuery['include_entities'] = 'false'
+  twtQuery['count'] = '10'
+  twtQuery['screen_name'] = 'grantmacken'
+elseif twtAction == 'feed' then
+  twtMethod = 'GET'
+  twtResource = 'https://api.twitter.com/1.1/statuses/home_timeline.json'
+  twtQuery['count'] = '10'
 elseif twtAction == 'show' then
   twtMethod = 'GET'
   twtResource = 'https://api.twitter.com/1.1/statuses/show.json'
@@ -72,6 +100,8 @@ elseif twtAction == 'show' then
     ngx.exit()
   else
     twtQuery['id'] = arg[2]
+    twtQuery['tweet_mode'] = 'extended'
+    twtQuery['include_entities'] = 'false'
   end
 elseif twtAction == 'delete' then
   twtResource = 'https://api.twitter.com/1.1/statuses/destroy.json'
@@ -99,7 +129,7 @@ elseif twtAction == 'unlike' then
   end
 elseif twtAction == 'likes' then
   twtMethod = 'GET'
-  twtResource = 'https://api.twitter.com/1.1/favorites/likes.json'
+  twtResource = 'https://api.twitter.com/1.1/favorites/list.json'
   twtQuery['count'] = 50
 elseif twtAction == 'retweet' then
   twtResource = 'https://api.twitter.com/1.1/statuses/retweet.json'
@@ -122,7 +152,11 @@ elseif twtAction == 'unretweet' then
 elseif twtAction == 'retweets' then
   twtMethod = 'GET'
   twtResource = 'https://api.twitter.com/1.1/statuses/retweets_of_me.json'
-  twtQuery['count'] = 50
+  twtQuery['count'] = 10
+elseif twtAction == 'mentions' then
+  twtMethod = 'GET'
+  twtResource = 'https://api.twitter.com/1.1/statuses/mentions_timeline.json'
+  twtQuery['count'] = 10
 elseif twtAction == 'oembed' then
   twtMethod = 'GET'
   twtResource = 'https://publish.twitter.com/oembed'
@@ -134,7 +168,7 @@ elseif twtAction == 'oembed' then
     twtQuery['url'] =  'https://twitter.com/'  ..  sOwner .. '/status/' .. arg[2]
   end
 else
-  ngx.say('FAILED arg' )
+  ngx.say('FAILED arg not resolved' )
   ngx.exit()
 end
 -- ngx.say(cjson.encode(twtQuery))
@@ -239,7 +273,6 @@ if not closed then
   ngx.log(ngx.ERR, ' - FAILED to get close: ' .. err)
 end
 
-
 local tHeaders = {}
 tHeaders["Authorization"]  = rBody
 tHeaders['Content-Type'] = 'application/x-www-form-urlencoded'
@@ -253,13 +286,13 @@ local tRequest = {
   query = twtQuery
 }
 
-ngx.say( pretty(tRequest) )
+-- ngx.say( pretty(tRequest) )
 
 local sAddress, sMsg = req.getAddress(twtHost)
 local sConnect = req.connect( sAddress, twtPort )
 local sHandshake = req.handshake( twtHost  )
-ngx.say( sConnect )
-ngx.say( sHandshake )
+-- ngx.say( sConnect )
+-- ngx.say( sHandshake )
 req.http:set_timeout(3000)
 local response, err = req.http:request( tRequest )
 if not response then
@@ -279,10 +312,46 @@ if not closed then
 end
 
 local oTwt = cjson.decode(twtResBody)
-ngx.say(pretty( oTwt,'\n','  ' ) )
 
 if type(oTwt.id_str) == 'string' then
   ngx.say(oTwt.id_str)
 end
-
+-- https://developer.twitter.com/en/docs/tweets/data-dictionary/overview/tweet-object.html
 -- ngx.say(twtResBody)
+if twtAction  == 'tweet' then
+  ngx.say(oTwt.id_str)
+elseif isArray[twtAction] then
+ for index, item in ipairs (oTwt) do
+   -- Wed May 31 18:00:48 +0000 2017
+   local m, err = ngx.re.match(item.created_at, twtTime)
+   local pTime = ngx.parse_http_time( m[1] .. ', ' .. m[3] .. ' '.. m[2] .. ' '  .. m[6] .. ' ' .. m[4] .. ' GMT')
+   local dateTime = os.date("%Y-%m-%d %A %I:%M %p ", pTime)
+   local sID = item.id_str
+   local sUserName =  item.user.name
+   local sUserLocation =  item.user.location
+   local sScreenName =  item.user.screen_name
+   local sUserID =  item.user.id_str
+   ngx.say(dateTime .. ' - [ ' .. sID .. ' ]' )
+   ngx.say(sUserName  ..  '  ( ' .. sScreenName  .. ' ) [ ' .. sUserID .. ' ] - '   .. sUserLocation )
+   ngx.say(item.text)
+   ngx.say('')
+ end
+elseif twtAction == 'show' then  
+  local sUserName     =  oTwt.user.name
+  local sUserLocation =  oTwt.user.location
+  local sScreenName   =  oTwt.user.screen_name
+  local sUserID       =  oTwt.user.id_str
+  ngx.say( sUserName  ..  '  ( ' .. sScreenName  .. ' ) [ ' .. sUserID .. ' ] - '   .. sUserLocation )
+  local m, err = ngx.re.match(oTwt.created_at, twtTime)
+  local pTime = ngx.parse_http_time( m[1] .. ', ' .. m[3] .. ' '.. m[2] .. ' '  .. m[6] .. ' ' .. m[4] .. ' GMT')
+  local dateTime = os.date("%Y-%m-%d %A %I:%M %p ", pTime)
+  local sID = oTwt.id_str
+  ngx.say(dateTime .. ' - [ ' .. sID .. ' ]')
+  ngx.say(oTwt.full_text)
+  ngx.say('liked:     [ ' .. oTwt.favorite_count ..  ' ]' )
+  ngx.say('retweeted: [ ' .. oTwt.retweet_count ..  ' ]' )
+else
+
+ ngx.say(pretty( oTwt,'\n','  ' ) )
+end
+

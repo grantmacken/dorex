@@ -77,7 +77,6 @@ if sAction == 'tag' then
   end
 end
 
-
 local function read(f)
   local open     = io.open
   local f, err = open(f, "rb")
@@ -88,21 +87,27 @@ local function read(f)
   f:close()
   return chunk
 end
-
+-- MAIN
+  -- current working domain and secrets
 local sDomain = os.getenv("DOMAIN")
-local rToken, err  = read('t/.' .. sDomain .. '.token')
+local sAccessToken = '/run/secrets/' ..
+ ngx.re.gsub(sDomain, "\\.",  "_", "i") ..
+ '_access_token'
+
+local rToken, err  = read(sAccessToken)
 if not rToken then
   ngx.say( ' - failed to get token: ', err   )
   ngx.exit()
 end
-
+  -- clean up token (remove any spaces)
 local sToken = ngx.re.gsub(rToken, "\\s",  "", "i")
+
 local req = require('grantmacken.req')
 local ngx_re = require('ngx.re')
 local cjson = require('cjson')
 local pretty = require "resty.prettycjson"
 
--- local ip =   req.getAddress( sDomain )
+-- micropub endpoint
 local sURL =  'https://' .. sDomain .. '/micropub'
 if type(sID) == 'string' then
   sUID = 'https://' .. sDomain .. '/' ..sID
@@ -236,47 +241,9 @@ elseif  sAction == 'tag' then
   sData ..
   sURL
 end
-
 -- ngx.say( sBody )
 os.execute(sBody)
 
 --ngx.say( sBody )
 ngx.exit(0)
-
--- local tData = {
---   action = "update",
---   url = "https://gmack.nz/n54T1",
---   replace = {
---     content = {"replaced hello moon"}
---   }
--- }
-
--- ngx.say( pretty(tData,'\n','  '))
--- ngx.say( cjson.encode(tData) )
-
--- local sMethod = ' -X POST '
--- local sResolve = ' --resolve ' .. sHost .. ':' .. iPort .. ':' .. sAddress .. ' '
--- local sAuth  = ' -H \'Authorization: Bearer ' .. sToken .. '\' '
--- local sContentType  = ' -H \'Content-Type: application/json\' '
--- local sData = ' --data \'' .. cjson.encode(tData) .. '\' '
--- local sWriteOut = [[
---  - connected to  [ %{remote_ip} ]
---  - request URL   [ %{url_effective} ]
---  - content type  [ %{content_type} ]
---  - ssl verified  [ %{ssl_verify_result} ] ( success is zero )
---  - transfer time [ %{time_total} ]
---  - response code [ %{response_code} ]
--- ]]
---  -- ngx.say( sWriteOut )
---  -- ' --output /dev/null' ..
--- local sBody = 'curl -s ' ..
---       sMethod ..
---       sResolve ..
---       sAuth  ..
---       sContentType ..
---       ' --write-out \'' ..  sWriteOut .. '\' ' ..
---       sData ..
---       sURL
--- sAuth .. sContentType .. sURL
-
 

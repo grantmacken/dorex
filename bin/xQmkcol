@@ -1,44 +1,22 @@
 #!/usr/bin/env resty
 if table.getn(arg) ~= 1 then
-  print(' usage: requires 1 param [ db-path ] ')
+  print(' usage: requires 1 param [ data-path ] ')
   ngx.exit()
 end
 
--- function read(f)
---   local open     = io.open
---   local f, e = open(f, "rb")
---   if not f then
---     return nil, e
---   end
---   local c = f:read "*a"
---   f.close()
---   return c
--- end
 
-local DBPATH = arg[1]
-
-local http = require("resty.http")
-local httpc = http.new()
-local resolver = require("resty.dns.resolver")
---- docker DNS resolver: 127.0.0.11
-local r, err, ans, ok
-r, err = resolver:new{nameservers = {'127.0.0.11'}}
-if not r then
-  ngx.say("failed to instantiate resolver: ", err)
-end
-ans, err = r:query("ex.", { qtype = r.TYPE_A })
-if not ans then
-  ngx.say("failed to query: ", err)
-end
-local ok, err = httpc:connect(ans[1].address,8080)
-if not ok then
-  ngx.say("ERR: Failed to connect ", err)
-  -- ngx.exit()
-end
--- ngx.say('connected to '  .. ans[1].address ..  ' on port  8080')
-local restPath = '/exist/rest/db/apps/'
--- ngx.say( ' - restPath'  .. restPath)
-local auth = 'Basic ' .. os.getenv("EXIST_AUTH")
+local DATA_PATH = arg[1]
+local req = require('grantmacken.req')
+local sContainerName = 'ex'
+local sDomain = os.getenv("DOMAIN")
+local sAuth = os.getenv("EXIST_AUTH")
+local sAddress, sMsg = req.getAddress( sContainerName )
+local sURL =  'http://' .. sAddress .. ':8080/exist/rest/db/data/' .. sDomain
+local sHost = req.http:parse_uri(sURL)[2]
+local iPort = req.http:parse_uri(sURL)[3]
+local sPath = req.http:parse_uri(sURL)[4]
+local sConnect = req.connect( sAddress, iPort )
+local sAction = 'local:mkcol(request:get-path-info(),"' .. DATA_PATH .. '")'
 
 local xQuery = [[
 <query xmlns="http://exist.sourceforge.net/NS/exist"
@@ -63,35 +41,47 @@ declare function local:mkcol-recursive($collection, $components) {
 declare function local:mkcol($collection, $path) {
     local:mkcol-recursive($collection, tokenize($path, "/"))
 };
-
-local:mkcol("/db", substring-after( "]] .. DBPATH .. [[" , "/db/"))
+]] .. sAction .. [[
 ]] ..']]>' .. [[
 </text>
 </query>
 ]]
 
-local req = {
+local tHeaders = {}
+tHeaders["Authorization"]  = 'Basic ' .. sAuth
+tHeaders['Content-Type'] = 'application/xml'
+tHeaders ["Host"] =  sDomain
+tHeaders['Accept'] = 'text/plain'
+
+local tRequest = {
   version = 1.1,
   method = "POST",
-  path = restPath,
-  headers = {
-    ["Content-Type"] =  'application/xml',
-    ["Authorization"] = auth
-  },
+  path = sPath,
+  headers = tHeaders,
   body = xQuery
 }
-local res =  httpc:request( req )
-local oBody
-if res.has_body then
-  local sBody, err = res:read_body()
-  if not sBody then
+
+req.http:set_timeout(10000)
+local response, err = req.http:request( tRequest )
+if not response then
+  ngx.say(' - ERR: failed to get response: ' .. err)
+  ngx.say(' - exiting ... '  )
+  ngx.exit()
+end
+
+local rBody
+if response.has_body then
+  rBody, err = response:read_body()
+  if not rBody then
     ngx.say("ERR: failed to read_body: ", err)
-    ngx.say(' - exiting ... '  )
     ngx.exit()
-  end
-  if sBody ~= '' then
-    -- ngx.say('INFO: has body type: : [ ' .. type( sBody ) .. ' ] ')
-    ngx.say( sBody )
   end
 end
 
+local closed, err = req.http:close()
+if not closed then
+    ngx.say("ERR: failed to close connection: ", err)
+    ngx.exit()
+end
+
+ngx.say( rBody )

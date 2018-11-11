@@ -1,22 +1,16 @@
 #!/usr/bin/env resty
+local req = require('grantmacken.req')
 local sContainerName = 'ex'
-local sAddress, sMsg = require('grantmacken.resolve').getAddress( sContainerName )
-ngx.log( ngx.INFO, sMsg )
+local sDomain = os.getenv("DOMAIN")
+local sAuth = os.getenv("EXIST_AUTH")
+local sAddress, sMsg = req.getAddress( sContainerName )
+local sURL =  'http://' .. sAddress .. ':8080/exist/rest/db/apps/' .. sDomain
+local sHost = req.http:parse_uri(sURL)[2]
+local iPort = req.http:parse_uri(sURL)[3]
+local sPath = req.http:parse_uri(sURL)[4]
+local sConnect = req.connect( sAddress, iPort )
 ngx.say( sMsg )
-local httpc = require("resty.http").new()
-ok, err = httpc:connect(sAddress,8080)
-if not ok then
-  ngx.say("ERR: Failed to connect ", err)
-  ngx.exit()
-end
-ngx.say(' - connected to '  .. sAddress ..  ' on port  8080')
-local restPath = '/exist/rest/db/apps/'
-ngx.say( ' - restPath'  .. restPath)
-if not os.getenv("EXIST_AUTH") then
-  ngx.say( ' -failed to get EXIST AUTH')
-  ngx.exit()
-end
-local auth = 'Basic ' .. os.getenv("EXIST_AUTH")
+ngx.say( sConnect )
 
 local xQuery = [[
 <query xmlns="http://exist.sourceforge.net/NS/exist"
@@ -34,9 +28,12 @@ try{
  ' revision: ' || system:get-revision() || $nl ,
  '     home: ' || system:get-exist-home() || $nl ,
  'repo root: ' || repo:get-root() || $nl ,
- '   max memory eXist can use: ' || system:get-memory-max() || $nl ,
- '        total memory in use: ' || system:get-memory-total() || $nl ,
- '      free memory available: ' || system:get-memory-free() || $nl ,
+ '--------------------------------------------------------',  $nl ,
+ ' max memory eXist can use: ' || system:get-memory-max() || $nl ,
+ '      total memory in use: ' || system:get-memory-total() || $nl ,
+ '    free memory available: ' || system:get-memory-free() || $nl ,
+ '            system uptime: ' || system:get-uptime()  || $nl ,
+ '--------------------------------------------------------',  $nl ,
  '       request: ' || request:exists()  || $nl,
  '    host-name : ' || request:get-hostname()  || $nl,
  '       method : ' || request:get-method()  || $nl,
@@ -56,6 +53,33 @@ try{
  '        current-user: ' || xmldb:get-current-user()  || $nl,
  ' is current user dba: ' || sm:is-dba(xmldb:get-current-user()) || $nl ,
  '    is-authenticated: ' || sm:is-authenticated() || $nl ,
+ '    is-authenticated: ' || sm:is-authenticated() || $nl ,
+ '--------------------------------------------------------',  $nl ,
+  '  expath package TITLE: ' || doc( request:get-path-info() ||  '/expath-pkg.xml')/*/*,  $nl ,
+  'expath package VERSION: ' || doc( request:get-path-info() ||  '/expath-pkg.xml')//@version/string() ,  $nl ,
+ '--------------------------------------------------------',  $nl ,
+ '     repo DESCRIPTION: ' || doc(  request:get-path-info() ||  '/repo.xml')//repo:description/string(),$nl ,
+ '--------------------------------------------------------',  $nl ,
+ ' scheduled jobs: ' || system:get-scheduled-jobs() || $nl ,
+ '--------------------------------------------------------',  $nl ,
+ '         vendor: ' || util:system-property('vendor') || $nl ,
+ '     vendor-url: ' || util:system-property('vendor-url' ) || $nl ,
+ '   product-name: ' || util:system-property('product-name') || $nl ,
+ 'product-version: ' || util:system-property('product-version') || $nl ,
+ '  product-build: ' || util:system-property('product-build') || $nl ,
+ '      java.home: ' || util:system-property('java.home') || $nl ,
+ '   java.version: ' || util:system-property('java.version') || $nl ,
+ '        os.arch: ' || util:system-property('os.arch') || $nl ,
+ '        os.name: ' || util:system-property('os.name') || $nl ,
+ '      user.home: ' || util:system-property('user.home') || $nl,
+ '      user.name: ' || util:system-property('user.name') || $nl,
+ '--------------------------------------------------------',  $nl,
+ ' available environment variables',  $nl,
+ '--------------------------------',  $nl,
+ for-each(
+  available-environment-variables(),
+  function( $item ){ $item || ': '  ||  environment-variable($item) || $nl } ), $nl,
+ '--------------------------------------------------------',  $nl ,
  $nl
 )
 } catch * {()}
@@ -64,29 +88,40 @@ try{
 </query>
 ]]
 
-local req = {
+local tHeaders = {}
+tHeaders["Authorization"]  = 'Basic ' .. sAuth
+tHeaders['Content-Type'] = 'application/xml'
+tHeaders ["Host"] =  sDomain
+tHeaders['Accept'] = 'text/plain'
+
+local tRequest = {
   version = 1.1,
   method = "POST",
-  path = restPath,
-  headers = {
-    ["Content-Type"] =  'application/xml',
-    ["Authorization"] = auth
-  },
+  path = sPath,
+  headers = tHeaders,
   body = xQuery
 }
-local res =  httpc:request( req )
-local oBody
-if res.has_body then
-  local sBody, err = res:read_body()
-  if not sBody then
-    ngx.say("ERR: failed to read_body: ", err)
-    ngx.say(' - exiting ... '  )
-    ngx.exit()
-  end
-  if sBody ~= '' then
-    ngx.say( sBody )
-  end
+
+req.http:set_timeout(3000)
+local response, err = req.http:request( tRequest )
+if not response then
+  ngx.say(' - ERR: failed to get response: ' .. err)
+  ngx.say(' - exiting ... '  )
+  ngx.exit()
 end
 
+local rBody
+if response.has_body then
+  rBody, err = response:read_body()
+  if not rBody then
+    ngx.say("ERR: failed to read_body: ", err)
+    ngx.exit()
+  end
+end
+local closed, err = req.http:close()
+if not closed then
+    ngx.say("ERR: failed to close connection: ", err)
+    ngx.exit()
+end
 
-
+ngx.say( rBody )
