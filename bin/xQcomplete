@@ -1,0 +1,152 @@
+#!/usr/bin/env resty
+
+local argCount = table.getn(arg)
+if argCount ~= 1 then
+  ngx.say(' usage: requires 1 param [ action ] ' )
+  ngx.say([[
+  functions
+ -----------------------------------------------
+ Notes
+
+]])
+  ngx.exit()
+end
+
+ngx.say( sConnect )
+local actions = {
+functions = true,
+modules = true,
+import = true
+}
+
+if not actions[ arg[1] ] then
+  ngx.say( 'ERROR: no "action" verified')
+  ngx.exit()
+end
+local sAction = arg[1]
+-- xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+local req = require('grantmacken.req')
+local sContainerName = 'ex'
+local sDomain = os.getenv("DOMAIN")
+local sAuth = os.getenv("EXIST_AUTH")
+local sAddress, sMsg = req.getAddress( sContainerName )
+local sURL =  'http://' .. sAddress .. ':8080/exist/rest/db'
+-- local sURL =  'http://' .. sAddress .. ':8080/exist/rest/db/apps/' .. sDomain
+
+local sHost = req.http:parse_uri(sURL)[2]
+local iPort = req.http:parse_uri(sURL)[3]
+local sPath = req.http:parse_uri(sURL)[4]
+local sConnect = req.connect( sAddress, iPort )
+
+-- util:registered-modules()
+-- Returns a sequence containing the namespace URIs of all modules 
+-- currently known to the system, including built in and imported module
+--
+-- for-each(
+  -- util:registered-modules(),
+  -- function( $m ){
+  --   $m
+  -- }
+  -- )
+local sRegModules = [[
+for-each(
+  util:registered-modules(),
+  function( $m ){
+    $m || $nl
+  }
+ )
+]]
+
+local sModules = [[
+for-each(
+  util:registered-modules(),
+  function( $m ){
+    for-each(
+      inspect:module-functions-by-uri(xs:anyURI($m)),
+      function( $function ){(
+      inspect:inspect-function($function),$nl 
+      )
+     }
+   )
+  }
+ )
+]]
+
+local sFunctions = [[
+for-each(
+  util:registered-functions(),
+  function( $f ){
+    $f || $nl
+  }
+ )
+]]
+
+if sAction == 'modules' then
+ sAction =  sModules
+elseif sAction == 'functions' then
+ sAction =  sFunctions
+ else
+ sAction = ''
+end
+
+local xQuery = [[
+<query xmlns="http://exist.sourceforge.net/NS/exist"
+ start='1'
+ max='9999'
+ wrap="no">
+<text>
+<![CDATA[
+xquery version "3.1";
+try{
+let $nl := "&#10;"
+return (
+]] ..
+sAction
+..
+[[
+)} catch * {
+   'ERR:' || $err:code || ': '  || $err:description
+}
+]] ..']]>' .. [[
+</text>
+</query>
+]]
+
+local tHeaders = {}
+tHeaders["Authorization"]  = 'Basic ' .. sAuth
+tHeaders['Content-Type'] = 'application/xml'
+tHeaders ["Host"] =  sDomain
+tHeaders['Accept'] = 'text/plain'
+local tRequest = {
+  version = 1.1,
+  method = "POST",
+  path = sPath,
+  headers = tHeaders,
+  body = xQuery
+}
+
+req.http:set_timeout(60000)
+local response, err = req.http:request( tRequest )
+if not response then
+  ngx.say(' - ERR: failed to get response: ' .. err)
+  ngx.say(' - exiting ... '  )
+  ngx.exit()
+end
+
+local rBody
+if response.has_body then
+  rBody, err = response:read_body()
+  if not rBody then
+    ngx.say("ERR: failed to read_body: ", err)
+    ngx.exit()
+  end
+end
+
+local closed, err = req.http:close()
+if not closed then
+    ngx.say("ERR: failed to close connection: ", err)
+    ngx.exit()
+end
+
+ngx.say( rBody )

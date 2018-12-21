@@ -1,0 +1,237 @@
+#!/usr/bin/env resty
+local argCount = table.getn(arg)
+if argCount ~= 1 then
+  ngx.say(' usage: requires 1 param [ export | restore ' )
+  ngx.say([[
+  backup and restore db
+  export   - zip data to host tmp dir
+  restore  - unzip data for from tmp dir
+ -----------------------------------------------
+ Notes
+ Upgrades might require full backup and restore
+ This is used by `make bu`
+]])
+  ngx.exit()
+end
+local actions = {
+export = true,
+repair = true,
+full = true,
+inc = true,
+list = true,
+delete = true,
+rename = true,
+import = true
+}
+
+if not actions[ arg[1] ] then
+  ngx.say( 'ERROR: no "action" verified')
+  ngx.exit()
+end
+local split = require("ngx.re").split
+local sAction = arg[1]
+local req = require('grantmacken.req')
+local sContainerName = 'ex'
+local sDomain = os.getenv("DOMAIN")
+local sAuth = os.getenv("EXIST_AUTH")
+local sAddress, sMsg = req.getAddress( sContainerName )
+local sURL =  'http://' .. sAddress .. ':8080/exist/rest/db'
+local sHost = req.http:parse_uri(sURL)[2]
+local iPort = req.http:parse_uri(sURL)[3]
+local sPath = req.http:parse_uri(sURL)[4]
+local sConnect = req.connect( sAddress, iPort )
+local sUser = split(ngx.decode_base64(sAuth),':')[1]
+local sPass = split(ngx.decode_base64(sAuth),':')[2]
+if not sPass then
+  ngx.exit()
+end
+
+local sRename = [[
+ for-each(
+  file:directory-list('/tmp', '*.zip')//@name,
+  function( $f ){
+    let $original := '/tmp/' || $f
+    let $destination := '/tmp/backup.zip'
+    let $moved :=
+     if ( not(file:exists($destination ))) then (
+          file:move($original,$destination)
+      ) else (false())
+    return
+    if ( $moved ) then (
+    'origin: ' || $original || $nl ,
+    'destination: ' || $destination || $nl ,
+    'moved:  ' || string($moved) || $nl
+    )
+    else ()
+  }
+  )
+ ]]
+
+local sList = [[
+ for-each(
+  file:directory-list('/tmp', '*.zip')//@name,
+  function( $f ){('backup zip: [ /tmp/' || $f || ' ]' ) }
+  )
+]]
+
+local sImport = 'system:import-silently("/tmp/backup.zip","' ..
+ sPass .. '","' .. sPass .. '")'
+
+-- let $sID := ']] .. sImport ..[['
+-- return (
+-- $sID
+-- ) ,  $nl,
+local sRunningQueries = [[
+'running queries: ...', $nl,
+ for-each(
+  system:get-running-xqueries()//xquery[./xqueryExpression[contains(.,'system:import-silently')] ],
+  function( $q ){
+   (
+   'query id: [ ' || $q/@id || ' ]' ,$nl, 
+   'terminating: [ ' || $q/@terminating || ' ]' ,$nl,
+   'terminating: '  ,$nl,
+   $q/xqueryExpression/string() ,$nl
+   )}
+  )
+]]
+
+local sxRunningQueries = [[
+'running queries: ...', $nl,
+ for-each(
+  system:get-running-xqueries()//xquery,
+  function( $n ){( $n) }
+  )
+]]
+
+local sDelete = [[
+ for-each(
+  file:directory-list('/tmp', '*.zip')//@name,
+  function( $file ){(
+  'delete file: '  || $file ||  ': ' || file:delete('/tmp/' || $file) || $nl )}
+  )
+]]
+
+local sExport = 'system:export-silently("/tmp",false(),true())'
+
+
+-- ngx.say(sImport)
+-- ngx.exit()
+
+local sFull = [[
+let $params :=
+ <parameters>
+    <param name="output" value="/tmp"/>
+    <parameter name="zip" value="yes"/>
+    <param name="backup" value="yes"/>
+    <param name="incremental" value="no"/>
+ </parameters>
+ return
+  system:trigger-system-task("org.exist.storage.ConsistencyCheckTask", $params)
+]]
+
+local sInc = [[
+let $params :=
+ <parameters>
+    <param name="output" value="/tmp"/>
+    <param name="backup" value="yes"/>
+    <parameter name="zip" value="yes"/>
+    <param name="incremental" value="yes"/>
+ </parameters>
+ return
+  system:trigger-system-task("org.exist.storage.ConsistencyCheckTask", $params)
+]]
+
+-- TODO! https://exist-db.org/exist/apps/doc/backup#server-side-backup
+local sRepair = [[
+repair:clean-all(),
+repair:repair()
+]]
+
+if sAction == 'export' then
+ sAction = [[ (
+ ]] .. sDelete .. ',' .. [[
+ ]] .. sExport .. ',' .. [[
+ ]] .. sRename .. ',' .. [[
+ ]] .. sList .. [[
+ )
+ ]]
+elseif sAction == 'import' then
+ sAction = sImport
+elseif sAction == 'full' then
+ sAction = sFull
+elseif sAction == 'inc' then
+ sAction = sInc
+elseif sAction == 'repair' then
+ sAction = sRepair
+elseif sAction == 'delete' then
+ sAction = sDelete
+elseif sAction == 'list' then
+ sAction = sRunningQueries
+elseif sAction == 'rename' then
+ sAction = sRename
+ else
+ sAction = ''
+end
+
+local xQuery = [[
+<query xmlns="http://exist.sourceforge.net/NS/exist"
+ start='1'
+ max='9999'
+ wrap="no">
+<text>
+<![CDATA[
+xquery version "3.1";
+import module namespace repair="http://exist-db.org/xquery/repo/repair"
+at "resource:org/exist/xquery/modules/expathrepo/repair.xql";
+declare default element namespace "http://exist-db.org/xquery/system";
+try{
+let $nl := "&#10;"
+return (
+]] ..
+sAction
+..
+[[
+)} catch * {
+   'ERR:' || $err:code || ': '  || $err:description
+}
+]] ..']]>' .. [[
+</text>
+</query>
+]]
+local tHeaders = {}
+tHeaders["Authorization"]  = 'Basic ' .. sAuth
+tHeaders['Content-Type'] = 'application/xml'
+tHeaders ["Host"] =  sDomain
+tHeaders['Accept'] = 'text/plain'
+local tRequest = {
+  version = 1.1,
+  method = "POST",
+  path = sPath,
+  headers = tHeaders,
+  body = xQuery
+}
+
+req.http:set_timeout(60000)
+local response, err = req.http:request( tRequest )
+if not response then
+  ngx.say(' - ERR: failed to get response: ' .. err)
+  ngx.say(' - exiting ... '  )
+  ngx.exit()
+end
+
+local rBody
+if response.has_body then
+  rBody, err = response:read_body()
+  if not rBody then
+    ngx.say("ERR: failed to read_body: ", err)
+    ngx.exit()
+  end
+end
+
+local closed, err = req.http:close()
+if not closed then
+    ngx.say("ERR: failed to close connection: ", err)
+    ngx.exit()
+end
+
+ngx.say( rBody )

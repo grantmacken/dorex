@@ -2,13 +2,13 @@ version: '3.7'
 services:
   exist:
     image: ${EXIST_IMAGE}:${EXIST_TAG}
-    container_name: ex
-    hostname: exDev
+    container_name: ${EXIST_CONTAINER_NAME}
+    hostname: ${EXIST_DEVELOPMENT_HOSTNAME}
     ports:
       - 8080:8080
     volumes:
       - type: volume
-        source: data
+        source: ${EXIST_DATA_VOLUME}
         target: ${EXIST_HOME}/${EXIST_DATA_DIR}
     secrets:
       - gmack_nz_access_token
@@ -43,7 +43,7 @@ services:
 volumes:
   data:
     driver: local
-    name: data
+    name: ${EXIST_DATA_VOLUME}
   site:
     driver: local
     name: site

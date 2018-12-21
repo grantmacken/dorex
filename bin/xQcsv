@@ -1,0 +1,81 @@
+#!/usr/bin/env resty
+
+local argCount = table.getn(arg)
+if argCount < 1 or argCount > 4 then
+  ngx.say(' usage: requires 1 arg  [ FILE ]')
+  ngx.say([[
+TODO
+]])
+  ngx.exit()
+end
+
+
+local req = require('grantmacken.req')
+local sContainerName = 'ex'
+local sDomain = os.getenv("DOMAIN")
+local sAuth = os.getenv("EXIST_AUTH")
+local sAddress, sMsg = req.getAddress( sContainerName )
+local sURL =  'http://' .. sAddress .. ':8080/exist/rest/db/apps/' .. sDomain
+local sHost = req.http:parse_uri(sURL)[2]
+local iPort = req.http:parse_uri(sURL)[3]
+local sPath = req.http:parse_uri(sURL)[4]
+local sConnect = req.connect( sAddress, iPort )
+ngx.say( sMsg )
+ngx.say( sConnect )
+
+local xQuery = [[
+<query xmlns="http://exist.sourceforge.net/NS/exist"
+ start='1'
+ max='9999'
+ wrap="no">
+<text>
+<![CDATA[
+xquery version "3.1";
+try{
+ let $nl := "&#10;"
+ return(
+ $nl
+)
+} catch * {()}
+]] ..']]>' .. [[
+</text>
+</query>
+]]
+
+local tHeaders = {}
+tHeaders["Authorization"]  = 'Basic ' .. sAuth
+tHeaders['Content-Type'] = 'application/xml'
+tHeaders ["Host"] =  sDomain
+tHeaders['Accept'] = 'text/plain'
+
+local tRequest = {
+  version = 1.1,
+  method = "POST",
+  path = sPath,
+  headers = tHeaders,
+  body = xQuery
+}
+
+req.http:set_timeout(3000)
+local response, err = req.http:request( tRequest )
+if not response then
+  ngx.say(' - ERR: failed to get response: ' .. err)
+  ngx.say(' - exiting ... '  )
+  ngx.exit()
+end
+
+local rBody
+if response.has_body then
+  rBody, err = response:read_body()
+  if not rBody then
+    ngx.say("ERR: failed to read_body: ", err)
+    ngx.exit()
+  end
+end
+local closed, err = req.http:close()
+if not closed then
+    ngx.say("ERR: failed to close connection: ", err)
+    ngx.exit()
+end
+
+ngx.say( rBody )
