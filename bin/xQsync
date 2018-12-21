@@ -7,8 +7,21 @@ if argCount < 1 or argCount > 2 then
  restore  restore data for domain from tmp dir
  -----------------------------------------------
  Notes
- expects $DOMAIN  as env var
+ expects $DOMAIN as env var
+ This is used by `make sync`
+ which syncs remote to local instance
 ]])
+  ngx.exit()
+end
+
+local actions = {
+export = true,
+remove = true,
+import = true
+}
+
+if not actions[ arg[1] ] then
+  ngx.say( 'ERROR: no "action" verified')
   ngx.exit()
 end
 
@@ -33,11 +46,11 @@ end
  ngx.say(' action: ', sAction )
 if sWhat == 'docs' then
     ngx.say('   what: ', sWhat )
-  elseif sWhat == 'export' then
+elseif sWhat == 'export' then
     ngx.say('   what: ', sWhat )
-  elseif sWhat == 'remove' then
+elseif sWhat == 'remove' then
     ngx.say('   what: ', sWhat )
-  else
+else
     ngx.say( 'ERROR: no "what" verified')
     ngx.exit()
 end
@@ -53,14 +66,44 @@ local iPort = req.http:parse_uri(sURL)[3]
 local sPath = req.http:parse_uri(sURL)[4]
 local sConnect = req.connect( sAddress, iPort )
 
+local sImport = [[
+let $nl := "&#10;"
+let $collection := request:get-path-info()
+let $directory := '/tmp'||$collection
+return
+(
+string($collection) || $nl,
+string($directory) || $nl,
+for-each(
+  file:directory-list($directory, '**/*')//file,
+  function( $file ){
+    let $path := $directory || '/' || $file/@subdir || '/' || $file/@name
+    let $col := $collection || '/' || $file/@subdir
+    return
+    (
+   'subdir: '  || $file/@subdir|| $nl,
+   'file: '  || $file/@name || $nl,
+   'path: '  || $path || $nl,
+   'is readable: ' || file:is-readable($path) || $nl,
+   'is readable: ' || file:is-readable($path) || $nl,
+    'stored' || xmldb:store( $col, $file/@name, file:read($path),'application/xml'  ),
+    $nl
+   )}
+  )
+)
+]]
+-- 'file: '  || $file || $nl 
+
 if sAction == 'export' then
  sAction = 'file:sync($collection, $directory, ())'
+elseif sAction == 'import' then
+ sAction = sImport
 elseif sAction == 'remove' then
  sAction = 'xmldb:remove($collection)'
 else
- sAction = 'xmldb:store-files-from-pattern($collection, $directory, "**/*","application/xml",true())'
+  ngx.exit()
 end
-
+ -- 'xmldb:store-files-from-pattern($collection, $directory, "**/*","application/xml",true())'
 local xQuery = [[
 <query xmlns="http://exist.sourceforge.net/NS/exist"
  start='1'
@@ -69,23 +112,25 @@ local xQuery = [[
 <text>
 <![CDATA[
 xquery version "3.1";
-try{
-let $nl := "&#10;"
-let $collection := request:get-path-info()
-let $directory := '/tmp' || $collection
-return (
-if ( file:exists($directory) ) then () else ( file:mkdirs($directory) ), $nl,
-'collection:' || $collection, $nl,
-'directory:' || $directory, $nl,
-]] .. sAction ..
+declare default element namespace "http://exist-db.org/xquery/file";
+try{]] ..
+sAction ..
 [[
-)} catch * {
+} catch * {
    'ERR:' || $err:code || ': '  || $err:description
 }
 ]] ..']]>' .. [[
 </text>
 </query>
 ]]
+
+-- let $nl := "&#10;"
+-- let $collection := request:get-path-info()
+-- let $directory := '/tmp' || $collection
+-- return (
+-- if ( file:exists($directory) ) then () else ( file:mkdirs($directory) ), $nl,
+-- 'collection:' || $collection, $nl,
+-- 'directory:' || $directory, $nl,
 
 local tHeaders = {}
 tHeaders["Authorization"]  = 'Basic ' .. sAuth
