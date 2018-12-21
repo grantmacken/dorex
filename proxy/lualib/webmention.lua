@@ -8,6 +8,7 @@ webmention.lua
  - OPM depends ...
 @see https://github.com/openresty/lua-nginx-module
 @see https://github.com/pintsized/lua-resty-http
+@see https://github.com/bungle/lua-resty-reqarg
 
  - My depends for this lib ...
 @gf proxy/lualib/util.lua
@@ -22,8 +23,6 @@ webmention.lua
 @gF proxy/conf/server.conf:23
 NOTE:   orDev for local
         orProd for remote
-
-
 
 # Receiving Webmentions
 
@@ -43,6 +42,8 @@ https://www.w3.org/TR/webmention/#h-webmention-verification
 --]]
 
 local util = require('grantmacken.util')
+local req = require("grantmacken.req")
+local reqargs = require("resty.reqargs")
 
 function _M.processRequest()
   ngx.log( ngx.INFO, '============================' )
@@ -61,8 +62,7 @@ function processPostArgs()
   ngx.log(ngx.INFO, ' - process POST arguments ' )
   local msg = ''
   local args = {}
-  ngx.req.read_body()
-  local reqargs = require "resty.reqargs"
+  -- ngx.req.read_body()
   local get, post, files = reqargs()
   if not get then
     msg = "failed to get post args: " ..  err
@@ -83,12 +83,12 @@ function processPostArgs()
   end
 
   if  getItems > 0 then
-    -- ngx.log(ngx.INFO, ' - count post args ' .. getItems )
+     ngx.log(ngx.INFO, ' - count post args ' .. getItems )
     args = get
   end
 
   if  postItems > 0 then
-    -- ngx.log(ngx.INFO, ' - count post args ' .. postItems )
+    ngx.log(ngx.INFO, ' - count post args ' .. postItems )
     args = post
   end
 
@@ -154,7 +154,8 @@ function processPostArgs()
       'bad request',
       msg)
   end
-   webmentionVerification( args['source'], args['target']  )
+
+  webmentionVerification( args['source'], args['target']  )
 end
 
   -- ngx.say( resID )
@@ -233,6 +234,7 @@ function webmentionVerification( source , target )
     -- plain text, the receiver should look for the URL by searching for the string.
     -- ngx.log(ngx.INFO, " - initial check is to see if target string is in source body text" )
     ngx.log(ngx.INFO, "source document MUST have an exact match of the target URL")
+
     if findTargetInSource( body , target ) then
        ngx.log(ngx.INFO, " - found target body text in source body text" )
        store(  source, target, body )
@@ -243,6 +245,7 @@ function webmentionVerification( source , target )
         'bad request',
         msg )
     end
+  ngx.exit(200)
   else
     if err then
       local msg =  'source URL not found - ' .. err .. ' - can not proccess ' .. contentTypeHeader
@@ -384,33 +387,26 @@ end
 
 
 function isValidResource( url )
-  local config = require('grantmacken.config')
-  local domain  = ngx.var.domain
-  -- ngx.log(ngx.INFO, 'target URL: ' .. url )
-  local msg = ''
-   -- lua-modules/util.lua
   local dbID = util.extractID( url )
   -- ngx.log(ngx.INFO, type(dbID) )
   if not dbID then
     return false
   end
-  -- ngx.log(ngx.INFO, 'extracted ID: ' .. dbID )
-  -- ngx.log(ngx.INFO, url)
-  local contentType = 'application/xml'
-  local restPath  = '/exist/rest/db'
-  local txt  =   [[
-  <query xmlns="http://exist.sourceforge.net/NS/exist" wrap="no">
-    <text>
-    <![CDATA[
-    xquery version "3.1";
-    try { doc-available( "xmldb:exist:///db/data/]] .. domain  .. '/docs/posts/' .. dbID .. [[") }
-    catch *{()}
-     ]] ..']]>' .. [[
-    </text>
-  </query>
+   ngx.log(ngx.INFO, 'extracted ID: ' .. dbID )
+   ngx.log(ngx.INFO, url)
+   local txt  =   [[
+<query xmlns="http://exist.sourceforge.net/NS/exist" wrap="no">
+  <text>
+  <![CDATA[
+  xquery version "3.1";
+  try { doc-available( "xmldb:exist:///db/data/]] .. ngx.var.domain  .. '/docs/posts/' .. dbID .. [[") }
+  catch *{()}
+    ]] ..']]>' .. [[
+  </text>
+</query>
 ]]
 
-  local exResult = require('grantmacken.eXist').restQuery( txt )
+  local exResult = postQuery( txt )
   -- expect boolean
   if exResult == 'true' then
     return true
@@ -445,11 +441,8 @@ end
 
 function isURL( url )
   ngx.log(ngx.INFO, url)
-  local config = require('grantmacken.config')
   local domain  = ngx.var.domain
-  local contentType = 'application/xml'
-  local restPath  = '/exist/rest/db'
-  local txt  =   [[
+  local txt =  [[
   <query xmlns="http://exist.sourceforge.net/NS/exist" wrap="no">
     <text>
     <![CDATA[
@@ -460,14 +453,61 @@ function isURL( url )
      ]] ..']]>' .. [[
     </text>
   </query>
+
 ]]
-  local exResult = require('grantmacken.eXist').restQuery( txt )
+
+  local exResult = postQuery( txt )
   -- expect boolean
   if exResult == 'true' then
     return true
   else
     return false
   end
+end
+
+
+function postQuery( xmlBody  )
+  local sPath  = '/exist/rest/db'
+  local sAddress, sMsg = req.getAddress( 'ex' )
+  ngx.log(ngx.INFO,  sMsg )
+  local sConnect = req.connect( sAddress, 8080 )
+  ngx.log(ngx.INFO,  sConnect )
+  ngx.log(ngx.INFO, sPath )
+  ngx.log(ngx.INFO, xmlBody )
+  local sAuth = 'Basic ' .. ngx.var.exAuth
+  -- ngx.log(ngx.INFO, auth )
+  local tHeaders = {}
+  tHeaders["Content-Type"] =  'application/xml'
+  tHeaders["Authorization"] =  sAuth
+  local tRequest = {
+    method = 'POST',
+    path = sPath,
+    headers = tHeaders,
+    ssl_verify = false,
+    body = xmlBody
+  }
+  req.http:set_timeout(6000)
+  local response, err = req.http:request( tRequest )
+  if not response then
+    ngx.say(' - ERR: failed to get response: ' .. err)
+    ngx.say(' - exiting ... '  )
+    ngx.exit()
+  end
+  ngx.log(ngx.INFO, 'Response status: ' .. response.status )
+  local rBody
+  if response.has_body then
+    rBody, err = response:read_body()
+    if not rBody then
+      ngx.say("ERR: failed to read_body: ", err)
+      ngx.exit()
+    end
+  end
+  local closed, err = req.http:close()
+  if not closed then
+    ngx.say("ERR: failed to close connection: ", err)
+    ngx.exit()
+  end
+  return rBody
 end
 
 return _M
