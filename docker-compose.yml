@@ -6,6 +6,8 @@ services:
     hostname: ${EXIST_DEVELOPMENT_HOSTNAME}
     ports:
       - 8080:8080
+    networks:
+      - www
     volumes:
       - type: volume
         source: ${EXIST_DATA_VOLUME}
@@ -25,6 +27,8 @@ services:
     ports:
       - 80:80
       - 443:443
+    networks:
+      - www
     volumes:
       - type: volume
         source: html
@@ -61,4 +65,7 @@ secrets:
     file: ./secrets/gmack_nz_access_token
   gmack_nz_twitter_credentials:
     file: ./secrets/gmack_nz_twitter_credentials
-
+networks:
+  www:
+    name: www
+    driver: bridge

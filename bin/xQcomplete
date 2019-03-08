@@ -15,7 +15,9 @@ end
 ngx.say( sConnect )
 local actions = {
 functions = true,
+docs = true,
 modules = true,
+mappedModules = true,
 import = true
 }
 
@@ -58,14 +60,23 @@ for-each(
  )
 ]]
 
-local sModules = [[
+local sFunDocs = [[
+for-each(
+ xmldb:xcollection('/db/apps/fundocs/data')//function/name/string(),
+  function( $m ){
+    $m || $nl
+  }
+ )
+]]
+
+local sRegisteredModules = [[
 for-each(
   util:registered-modules(),
   function( $m ){
     for-each(
       inspect:module-functions-by-uri(xs:anyURI($m)),
       function( $function ){(
-      inspect:inspect-function($function),$nl 
+      inspect:inspect-function($function)/@name/string(),$nl
       )
      }
    )
@@ -73,7 +84,32 @@ for-each(
  )
 ]]
 
-local sFunctions = [[
+local sMappedModules = [[
+for-each(
+  util:mapped-modules(),
+  function( $m ){
+    for-each(
+      inspect:module-functions-by-uri(xs:anyURI($m)),
+      function( $function ){(
+      inspect:inspect-function($function)/@name/string(),$nl
+      )
+     }
+   )
+  }
+ )
+]]
+
+
+local sRegisteredFunctions = [[
+for-each(
+  util:registered-functions(),
+  function( $f ){
+    $f || $nl
+  }
+ )
+]]
+
+local sMyFunctions = [[
 for-each(
   util:registered-functions(),
   function( $f ){
@@ -83,11 +119,15 @@ for-each(
 ]]
 
 if sAction == 'modules' then
- sAction =  sModules
+  sAction =  sRegisteredModules
+elseif sAction == 'docs' then
+  sAction = sFunDocs
 elseif sAction == 'functions' then
- sAction =  sFunctions
- else
- sAction = ''
+  sAction =  sRegisteredFunctions
+elseif sAction == 'mappedModules' then
+  sAction =  sMappedModules
+else
+  sAction = ''
 end
 
 local xQuery = [[
@@ -98,6 +138,7 @@ local xQuery = [[
 <text>
 <![CDATA[
 xquery version "3.1";
+declare default element namespace "http://www.xqdoc.org/1.0";
 try{
 let $nl := "&#10;"
 return (

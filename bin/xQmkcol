@@ -4,7 +4,6 @@ if table.getn(arg) ~= 1 then
   ngx.exit()
 end
 
-
 local DATA_PATH = arg[1]
 local req = require('grantmacken.req')
 local sContainerName = 'ex'

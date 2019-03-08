@@ -2,6 +2,7 @@ local _M = {}
 local http = require("resty.http").new()
 local util = require("grantmacken.util")
 
+_M.version = '0.0.1'
 
 --- Domain DNS Resolution
 -- @usage  Given DOMAIN Resolve IP address
@@ -136,6 +137,124 @@ local function reqObj( request )
     tRequest['body'] = request['sData']
   end
   return tRequest
+end
+
+function _M.eX( oReq )
+  local pretty = require('resty.prettycjson')
+  local sAddress, sMsg = getAddress( 'ex' )
+  local sConnect = connect( sAddress, 8080 )
+  -- ngx.say(sConnect)
+  local tHeaders = {}
+  tHeaders["Content-Type"] = oReq.contentType
+  tHeaders["Authorization"] = 'Basic ' .. oReq.auth
+  local tRequest = {}
+    tRequest['method'] = oReq.method
+    tRequest['path'] = oReq.path
+    tRequest['ssl_verify'] = false
+    tRequest['headers'] = tHeaders
+  if ( oReq['method'] == "POST" or oReq['method'] == "PUT" )  then
+    if oReq['contentType'] == 'application/json' then
+      tRequest['body'] = pretty( oReq.data, '\n','  ')
+    else
+      tRequest['body'] = oReq.data
+    end
+  end
+  http:set_timeout(6000)
+  local response, err = http:request( tRequest )
+  -- ngx.say( " - response status: " .. response.status)
+  -- ngx.say( " - response reason: " .. response.reason)
+  return response
+end
+
+function _M.eXwrap( sAction )
+return [[
+<query xmlns="http://exist.sourceforge.net/NS/exist"
+ start='1'
+ max='9999'
+ wrap="no">
+<text>
+<![CDATA[
+xquery version "3.1";
+try{
+let $nl := "&#10;"
+return (
+]] ..
+sAction
+..
+[[
+)} catch * {
+   'ERR:' || $err:code || ': '  || $err:description
+}
+]] ..']]>' .. [[
+</text>
+</query>
+]]
+end
+
+function _M.eXwrapper( oWrap )
+return [[
+<query xmlns="http://exist.sourceforge.net/NS/exist"
+ start='1'
+ max='9999'
+ wrap="no">
+<text>
+<![CDATA[
+xquery version '3.1';
+]] ..
+oWrap['sDeclare']
+..
+[[
+try{
+]] ..
+oWrap['sLet']
+..
+[[
+return (
+]] ..
+oWrap['sReturn']
+..
+[[
+)} catch * {(
+  util:log-system-out(   'ERR:' || $err:code || ': '  || $err:description),
+  'ERR:' || $err:code || ': '  || $err:description
+)}
+]] ..']]>' .. [[
+</text>
+</query>
+]]
+end
+
+--- a generic boilerplate response
+--  log and send json message and terminate request
+-- @usage  Given DOMAIN Resolve IP address
+-- @return exit
+-- @parm   oRes { }
+-- ['status'] = http-status-constant
+-- https://github.com/openresty/lua-nginx-module#http-status-constants
+-- ['log'] = http-status-constant
+-- https://github.com/openresty/lua-nginx-module#nginx-log-level-constants
+-- ['err'] 
+-- ['msg'] 
+function _M.res( oRes )
+  ngx.status = oRes['status']
+  ngx.header.content_type = 'application/json'
+  local oOut = {}
+  local oLog = {}
+
+  ngx.log( ngx.INFO, ' - STATUS  ' .. oRes['status'] )
+  if oRes['status'] >= oRes['status'] then
+    oOut['error']  = oRes['err']
+    oOut['message'] =  oRes['msg']
+    oLog['level'] =  ngx.WARN
+    oLog['message'] =  oRes['msg']
+  else
+    oOut['info'] =  oRes['msg']
+    oLog['level'] =  ngx.INFO
+    oLog['message'] =  oRes['msg']
+  end
+  ngx.log( oLog['level'], ' - ' .. oLog['message'] )
+  ngx.print( cjson.encode(oOut) )
+  return ngx.exit(oRes['status'])
 end
 
 _M.http = http

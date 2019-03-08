@@ -1,80 +1,89 @@
 #!/usr/bin/env resty
-if table.getn(arg) ~= 2 then
-  print(' usage: requires 2 params [ route  perm ] ')
+if table.getn(arg) < 1  or table.getn(arg)  > 2 then
+  print(' usage: requires 1 or 2 params [ route  perm? ] ')
   ngx.exit()
 end
 
 local ROUTE = arg[1]
-local PERM = arg[2]
--- ngx.say( ' - ROUTE ' .. ROUTE )
--- ngx.say( ' - PERM ' .. PERM )
-local http = require("resty.http")
-local httpc = http.new()
-local resolver = require("resty.dns.resolver")
---- docker DNS resolver: 127.0.0.11
-local r, err, ans, ok
-r, err = resolver:new{nameservers = {'127.0.0.11'}}
-if not r then
-  ngx.say("failed to instantiate resolver: ", err)
+local PERM
+if not arg[2] then
+  PERM = 'rwxr-xr-x'
 end
-ans, err = r:query("ex.", { qtype = r.TYPE_A })
-if not ans then
-  ngx.say("failed to query: ", err)
+local say = ngx.say
+local exit = ngx.exit
+-- say( ' - ROUTE ' .. ROUTE )
+-- say( ' - PERM ' .. PERM )
+-- local cjson  = require('cjson')
+-- local prty = require('resty.prettycjson')
+local req = require("grantmacken.req")
+if ( type(os.getenv("EXIST_AUTH")) ~= 'string' ) then
+  exit()
 end
-local ok, err = httpc:connect(ans[1].address,8080)
-if not ok then
-  ngx.say("ERR: Failed to connect ", err)
-  -- ngx.exit()
+if ( type(os.getenv("DOMAIN")) ~= 'string' ) then
+  exit()
 end
--- ngx.say('connected to '  .. ans[1].address ..  ' on port  8080')
-local restPath = '/exist/rest/db/apps/'
--- ngx.say( ' - restPath'  .. restPath)
-local auth = 'Basic ' .. os.getenv("EXIST_AUTH")
+local sAuth =  os.getenv("EXIST_AUTH")
+--[[
+-- use eXwraper pettern
+local sDeclare = ''
+local sLet = ''
+local sReturn = ''  
+local oWrap = {
+    ['sDeclare'] = sDeclare,
+    ['sLet'] = sLet,
+    ['sReturn'] = sReturn
+  }
+  local oReq = {
+    ['path'] = '/exist/rest/db',
+    ['auth'] =  sAuth,
+    ['method'] = 'POST',
+    ['contentType'] = 'application/xml',
+    ['data'] = req.eXwrapper(oWrap)
+  }
+local res = req.eX(oReq)
 
-local xQuery = [[
-<query xmlns="http://exist.sourceforge.net/NS/exist"
- start='1'
- max='9999'
- wrap="no">
-<text>
-<![CDATA[
-xquery version "3.1";
-try{
- let $route  := ']] .. ROUTE .. [['
- let $perm  := ']] .. PERM .. [[' 
- let $setPerm := 
- if(sm:get-permissions(xs:anyURI($route))//@mode/string() eq $perm ) then ()
- else (sm:chmod(xs:anyURI($route),$perm ))
- return( sm:get-permissions(xs:anyURI($route))//@mode/string() )
-} catch * {()}
-]] ..']]>' .. [[
-</text>
-</query>
+--]]
+
+local sDeclare = ''
+local sLet = [[
+let $nl := "&#10;"
+let $route  := ']] .. ROUTE .. [['
+let $perm  := ']] .. PERM .. [['
 ]]
 
-local req = {
-  version = 1.1,
-  method = "POST",
-  path = restPath,
-  headers = {
-    ["Content-Type"] =  'application/xml',
-    ["Authorization"] = auth
-  },
-  body = xQuery
-}
+local sReturn = [[
+ if( util:binary-doc-available($route)) then (
+ ' - route: ' || $route , $nl,
+ if( sm:get-permissions(xs:anyURI($route))//@mode/string() eq $perm ) then ()
+ else (sm:chmod(xs:anyURI($route),$perm )),
+ ' - permisions: ' || sm:get-permissions(xs:anyURI($route))//@mode/string(),
+ $nl
+ ) else (
+ util:binary-doc-available($route)
+ )
+]]
 
-local res =  httpc:request( req )
--- ngx.say( ' - res ' .. res.status )
-local oBody
-if res.has_body then
-  local sBody, err = res:read_body()
-  if not sBody then
-    ngx.say("ERR: failed to read_body: ", err)
-    ngx.say(' - exiting ... '  )
-    ngx.exit()
-  end
-  if sBody ~= '' then
-    -- ngx.say('INFO: has body type: : [ ' .. type( sBody ) .. ' ] ')
-    ngx.say( sBody )
-  end
+local oWrap = {
+    ['sDeclare'] = sDeclare,
+    ['sLet'] = sLet,
+    ['sReturn'] = sReturn
+  }
+
+local oReq = {
+  ['path'] = '/exist/rest/db',
+  ['auth'] =  sAuth,
+  ['method'] = 'POST',
+  ['contentType'] = 'application/xml',
+  ['data'] = req.eXwrapper(oWrap)
+}
+local res = req.eX(oReq)
+say(' - eXist response: ' ,  res.reason )
+
+local resBody, err = res:read_body()
+if not resBody then
+  local msg = "failed to read data: " .. err
+  say( msg )
+  exit()
 end
+
+say( resBody )

@@ -59,11 +59,10 @@ end
 local function version( )
   local ver =  c.cmark_version_string()
   --  ver is typeof CDATA
-  return 
+  return
   ffi.string(ver, ffi.sizeof(ver))
 end
 
-_M.version = version()
 
 --  Parsing
 function _M.parseString( s )
@@ -91,4 +90,5 @@ function _M.renderCommonMark( doc )
   ffi.string(r)
 end
 
+_M.version = version()
 return _M

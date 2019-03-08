@@ -14,19 +14,29 @@ remove:   remove from repo
 undeploy: remove from db - call cleanup script
 --]]
 
+local say = ngx.say
+local exit = ngx.exit
+local req = require('grantmacken.req')
+
 local argCount = table.getn(arg)
 if argCount < 1 or argCount > 2 then
-  ngx.say(' usage: requires 1 or 2 params [ action, (package)? ] ')
-  ngx.say([[
+  say(' usage: requires 1 or 2 params [ action, (package)? ] ')
+  say([[
  list     List all the installed packages
  update   Update all the installed packages
  upgrade  PACKAGE
  info   PACKAGE
  get    PACKAGE
  remove PACKAGE
- search (PACKAGE)?
+ search (PACKAGE)? lists packages on remote exist server
+        search has 3 special token search strings
+        1. all:  list all available packages
+        2. libs: list all library packages
+        2. apps: list all application packages
+        otherwise
+        the search will look for the string in the package abbrev
 ]])
-  ngx.exit()
+  exit()
 end
 
 local ACTION = arg[1]
@@ -34,6 +44,14 @@ local PACKAGE = ''
 if arg[2] then
  PACKAGE = arg[2]
 end
+
+-- say( 'action: ', ACTION )
+-- say( 'package: ', PACKAGE )
+if not os.getenv("EXIST_AUTH") then
+  exit()
+end
+local auth = 'Basic ' .. os.getenv("EXIST_AUTH")
+local sAuth = 'Basic ' .. os.getenv("EXIST_AUTH")
 
 local sContainerName = 'ex'
 local sAddress, sMsg = require('grantmacken.resolve').getAddress( sContainerName )
@@ -48,20 +66,9 @@ end
 --ngx.say(' - connected to '  .. sAddress ..  ' on port  8080')
 local restPath = '/exist/rest/db/apps/'
 -- ngx.say( ' - restPath'  .. restPath)
-if not os.getenv("EXIST_AUTH") then
-  ngx.exit()
-end
-local auth = 'Basic ' .. os.getenv("EXIST_AUTH")
 
---[[
- list    -  List all the installed packages
- update  -  Update installed packages to a newer versions
- info   PACKAGE  -  About package
- get    PACKAGE  -  Install package
- remove PACKAGE  -  Remove package
- search QUERY?   -  Search for available packages
---]]
 local URL = 'http://demo.exist-db.org/exist/apps/public-repo'
+-- http://demo.exist-db.org/exist/apps/public-repo/public/apps.xml?version=4.5.0
 local qStart = [[
 <query xmlns="http://exist.sourceforge.net/NS/exist"
  start='1'
@@ -74,13 +81,19 @@ declare namespace pkg = "http://expath.org/ns/pkg";
 declare namespace rpo = "http://exist-db.org/xquery/repo";
 ]]
 
+local qEnd = [[
+} catch * {()}
+]] ..']]>' .. [[
+</text>
+</query>
+]]
+
 local qSpacers = [[
  let $nl := "&#10;"
  let $tab := '&#009;'
  let $space := '&#32;'
  let $sep := '&#32;-&#32;'
 ]]
-
 
 local bodyFromArg
 if ACTION == 'list' or ACTION == 'ls' then
@@ -91,58 +104,84 @@ try{ ]] .. qSpacers .. [[
  ' - list of all the installed eXist packages' || $nl,
  ' ------------------------------------------------------------' || $nl,
  for $app in repo:list()
-   let $docpkg :=  util:parse(util:binary-to-string(repo:get-resource($app,'expath-pkg.xml')))
+   let $docpkg :=  $app =>
+                   repo:get-resource('expath-pkg.xml')  =>
+                   util:binary-to-string() =>
+                   util:parse()
    order by $docpkg//@abbrev
    return (
    '[ ' || $docpkg//@abbrev/string() ||  ' ] ' || $space || 'v'   ||
    $docpkg//@version/string() || $sep  ||
    $docpkg//pkg:title/string() || $nl
    ))
- } catch * {()}
-]] ..']]>' .. [[
-</text>
-</query>
-]]
+]] .. qEnd
 elseif ACTION == 'search' or ACTION == 'find' then
+say(URL .. '/public/apps.xml?version=' .. '4.5.0' )
+exit()
 bodyFromArg = qStart ..
 [[
 try{ ]] .. qSpacers .. [[
   let $query  := ']] .. PACKAGE .. [['
   let $URL  := ']] .. URL .. [['
   let $APPS := $URL || '/public/apps.xml?version=' || system:get-version()
-  let $doc := doc($APPS)
+  let $apps := doc($APPS)/apps/app
   return(
- if ( $query  eq '' ) then (
- for $app in  $doc//app
-   order by $app/abbrev
-   return(
-      '[ ' || $app/abbrev/string() ||  ' ] ' || $space || 'v'   ||
-      $app/version/string()  || $sep  ||
-      $app/title/string() || $tab || $app/description/string() || $nl
-   ))
- else (
-  for $app in  $doc//app
-  where $app[ abbrev[contains(lower-case(.),lower-case($query))] or title[contains(lower-case(.),lower-case($query))] ]
-  order by $app/abbrev
-  return(
-      '[ ' || $app/abbrev/string() ||  ' ] ' || $space || 'v'   ||
-      $app/version/string()  || $sep  ||
-      $app/title/string() || $tab || $app/description/string() || $nl
-   )
-   )
-   )
-} catch * {()}
-]] ..']]>' .. [[
-</text>
-</query>
-]]
+ ' - search for apps available for eXist version: ' || system:get-version(), $nl,
+ if ( $query  eq 'all' ) then (
+  ' - listing: ' || $query || ' apps', $nl,
+   for $app in $apps
+   let $abbrev := $app/abbrev[1]/string()
+   let $name := $app/name/string()
+   let $title := $app/title/string()
+   let $version := concat('v',$app/version/string())
+   let $seq := ( '[',  $abbrev , '](',$name,')', $space, $version, $sep, $title, $nl )
+   order by $abbrev
+   return $seq
+  )
+ else if ( $query = ( 'lib','library', 'libraries', 'libs' )) then (
+  ' - listing: library apps', $nl,
+  for $app in $apps[type = 'library' ]
+   let $abbrev := $app/abbrev[1]/string()
+   let $name := $app/name/string()
+   let $title := $app/title/string()
+   let $type := substring($app/type/string(),1,3)
+   let $version := concat('v',$app/version/string())
+   let $seq := ( '[',  $abbrev , '](',$name,')', $space, $version, $sep, $title, $nl )
+   order by $abbrev
+   return $seq
+ )
+ else if ( $query  = ( 'application','applications','app','apps' )) then (
+  ' - listing: application apps', $nl,
+  for $app in $apps[type = 'application' ]
+   let $abbrev := $app/abbrev[1]/string()
+   let $name := $app/name/string()
+   let $title := $app/title/string()
+   let $type := substring($app/type/string(),1,3)
+   let $version := concat('v',$app/version/string())
+   let $seq := ( '[',  $abbrev , '](',$name,')', $space, $version, $sep, $title, $nl )
+   order by $abbrev
+   return $seq
+ )
+ else
+ (
+  for $app in $apps[ abbrev[contains(lower-case(.),lower-case($query))] or title[contains(lower-case(.),lower-case($query))] ]
+   let $abbrev := $app/abbrev[1]/string()
+   let $name := $app/name/string()
+   let $title := $app/title/string()
+   let $version := concat('v',$app/version/string())
+   let $seq := ( '[',  $abbrev , '](',$name,')', $space, $version, $sep, $title, $nl )
+   order by $abbrev
+   return $seq
+  )
+)
+]] .. qEnd
 elseif ACTION == 'info' then
 bodyFromArg = qStart ..
 [[
 try{ ]] .. qSpacers .. [[
  let $query  := ']] .. PACKAGE .. [['
  let $pkg := for $app in repo:list()
-   let $docpkg  :=  util:parse(util:binary-to-string(repo:get-resource($app, 'expath-pkg.xml')))
+   let $docpkg  :=  util:parse(util:binary-to-string(repo:gnnet-resource($app, 'expath-pkg.xml')))
    return
    $docpkg/pkg:package[@abbrev[. = $query] ]
 
@@ -183,7 +222,8 @@ $err:code || ': '  || $err:description || '&#10;'
 </text>
 </query>
 ]]
-elseif  ACTION == 'get'  or  ACTION == 'install'   then
+elseif  ACTION == 'get'  or  ACTION == 'install' then
+  
 bodyFromArg = qStart ..
 [[
 try{ ]] .. qSpacers .. [[
@@ -340,6 +380,8 @@ else
     ngx.exit()
 end
 
+-- say(bodyFromArg)
+
 local req = {
   version = 1.1,
   method = "POST",
@@ -370,10 +412,3 @@ if res.has_body then
     ngx.say( oBody )
   end
 end
--- (:
---            $map('pkgAbbrev') || ' [ ' || $map('pkgName') || ' ]',$nl,
---         ' | local    remote    update' ,$nl,
---         ' [ ' || $map('pkgVersion') ||
---         ' ] [ ' ,  $map('rpoVersion') ||
---         ' ]'  || ' [ ' || string($compare)  ||
---         ' ]' , :) 

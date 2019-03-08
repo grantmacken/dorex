@@ -101,22 +101,23 @@ local function extractDomain( url )
 end
 
 local function extractToken()
-   -- ngx.log(ngx.INFO, "Extract Token")
+   ngx.log(ngx.INFO, "Extract Token")
   --TODO! token in post args
   --access_token - the OAuth Bearer token authenticating the request
   --(the access token may be sent in an HTTP Authorization header or
   --this form parameter)
   -- ngx.log(ngx.INFO, ngx.var.http_authorization )
+  local token
   if ngx.var.http_authorization == nil then
     ngx.req.read_body()
-    local token = ngx.req.get_post_args()['access_token']
+    token = ngx.req.get_post_args()['access_token']
     if token  ~=  nil then
       return token
     else
       return requestError(ngx.HTTP_UNAUTHORIZED,'unauthorized', 'read body but no token')
     end
   else
-    local token, err = require("ngx.re").split(ngx.var.http_authorization,' ')[2]
+    token, err = require("ngx.re").split(ngx.var.http_authorization,' ')[2]
     if err then
       return requestError(ngx.HTTP_UNAUTHORIZED,'unauthorized', 'no token')
     end
@@ -198,77 +199,76 @@ local function isTokenValid( jwtObj )
   return true
 end
 
-local function indieLoginVerifyAuthorizationCode( )
-  -- user redirected back to my site
-  ngx.log(ngx.INFO, " - verify the authorization code with IndieLogin.com ")
-  local reqargs = require("resty.reqargs")
-  local req = require("grantmacken.req")
-  local get, post, files = reqargs()
-  if not get then
-    local msg = " failed to get response args"
-    return requestError(ngx.HTTP_UNAUTHORIZED,'unauthorized', msg )
-  end
-  -- two parameters in the query string, state and code
-  if ( type(get['scope']) ~= 'string' ) or ( type(get['code']) ~= 'string' ) then
-    local msg = " failed to get scope or code params"
-    return requestError(ngx.HTTP_UNAUTHORIZED,'unauthorized', msg )
-  end
-  local sURL =  'https://indielogin.com/auth'
-  local sHost = http:parse_uri(sURL)[2]
-  local iPort = http:parse_uri(sURL)[3]
-  local sPath = http:parse_uri(sURL)[4]
-  local sAddress, sMsg = req.getDomainAddress( sHost )
-  local sConnect =       req.connect( sAddress, iPort )
-  local sHandshake =     req.handshake( sHost )
-  local tHeaders = {}
-    tHeaders['Host'] = sHost
-    tHeaders['Content-Type'] = 'application/x-www-form-urlencoded'
-    tHeaders['Accept'] = 'application/json'
-  local tRequest = {}
-    tRequest['version'] = 1.1
-    tRequest['method'] = 'POST'
-    tRequest['path'] = sPath
-    tHeaders['query'] = {
-      ['code'] = get['state'],
-      ['redirect_uri'] = 'https://' .. ngx.var.domain .. '/_login',
-      ['client_id'] = ngx.var.domain
-    }
-    tRequest['ssl_verify'] = false
-    tRequest['headers'] = tHeaders
-  local response, err = http:request( tRequest )
-  if not response then
-     msg = "failed to complete request: ", err
-     return requestError(ngx.HTTP_UNAUTHORIZED,'unauthorized', msg )
-  end
-  ngx.log(ngx.INFO, " indielogin request response status: " .. response.status)
-  ngx.log(ngx.INFO, " indielogin request response eason: " .. response.reason)
+--local function indieLoginVerifyAuthorizationCode( )
+--  -- user redirected back to my site
+--  ngx.log(ngx.INFO, " - verify the authorization code with IndieLogin.com ")
+--  local reqargs = require("resty.reqargs")
+--  local req = require("grantmacken.req")
+--  local get, post, files = reqargs()
+--  if not get then
+--    local msg = " failed to get response args"
+--    return requestError(ngx.HTTP_UNAUTHORIZED,'unauthorized', msg )
+--  end
+--  -- two parameters in the query string, state and code
+--  if ( type(get['scope']) ~= 'string' ) or ( type(get['code']) ~= 'string' ) then
+--    local msg = " failed to get scope or code params"
+--    return requestError(ngx.HTTP_UNAUTHORIZED,'unauthorized', msg )
+--  end
+--  local sURL =  'https://indielogin.com/auth'
+--  local sHost = http:parse_uri(sURL)[2]
+--  local iPort = http:parse_uri(sURL)[3]
+--  local sPath = http:parse_uri(sURL)[4]
+--  local sAddress, sMsg = req.getDomainAddress( sHost )
+--  local sConnect =       req.connect( sAddress, iPort )
+--  local sHandshake =     req.handshake( sHost )
+--  local tHeaders = {}
+--    tHeaders['Host'] = sHost
+--    tHeaders['Content-Type'] = 'application/x-www-form-urlencoded'
+--    tHeaders['Accept'] = 'application/json'
+--  local tRequest = {}
+--    tRequest['version'] = 1.1
+--    tRequest['method'] = 'POST'
+--    tRequest['path'] = sPath
+--    tHeaders['query'] = {
+--      ['code'] = get['state'],
+--      ['redirect_uri'] = 'https://' .. ngx.var.domain .. '/_login',
+--      ['client_id'] = ngx.var.domain
+--    }
+--    tRequest['ssl_verify'] = false
+--    tRequest['headers'] = tHeaders
+--  local response, err = http:request( tRequest )
+--  if not response then
+--     msg = "failed to complete request: ", err
+--     return requestError(ngx.HTTP_UNAUTHORIZED,'unauthorized', msg )
+--  end
+--  ngx.log(ngx.INFO, " indielogin request response status: " .. response.status)
+--  ngx.log(ngx.INFO, " indielogin request response eason: " .. response.reason)
 
-   if response.has_body then
-     body, err = response:read_body()
-     if not body then
-       msg = "failed to read body: " ..  err
-       return requestError(ngx.HTTP_UNAUTHORIZED,'unauthorized', msg )
-     end
-     --ngx.log(ngx.INFO, " - response body received and read ")
-     local args = cjson.decode(body)
-     if not args then
-       msg = "failed to decode json " ..  err
-       return requestError(ngx.HTTP_UNAUTHORIZED,'unauthorized', msg )
-     end
-     ngx.log(ngx.INFO, " - verify body decoded ")
-     local myDomain = extractDomain( args['me'] )
-     -- local clientDomain = extractDomain( args['client_id'] )
-     --ngx.log(ngx.INFO, "Am I the one who authorized the use of this token?")
-     if ngx.var.domain  ~=  myDomain  then
-       return  requestError(ngx.HTTP_UNAUTHORIZED,'insufficient_scope', 'you are not me')
-     end
-     ngx.log(ngx.INFO, 'Yep! ' .. ngx.var.domain .. ' same domain as '  .. myDomain   )
-   else
-     msg = " - failed response has no body "
-     return requestError(ngx.HTTP_UNAUTHORIZED,'unauthorized', msg )
-   end
-end
-
+--   if response.has_body then
+--     body, err = response:read_body()
+--     if not body then
+--       msg = "failed to read body: " ..  err
+--       return requestError(ngx.HTTP_UNAUTHORIZED,'unauthorized', msg )
+--     end
+--     --ngx.log(ngx.INFO, " - response body received and read ")
+--     local args = cjson.decode(body)
+--     if not args then
+--       msg = "failed to decode json " ..  err
+--       return requestError(ngx.HTTP_UNAUTHORIZED,'unauthorized', msg )
+--     end
+--     ngx.log(ngx.INFO, " - verify body decoded ")
+--     local myDomain = extractDomain( args['me'] )
+--     -- local clientDomain = extractDomain( args['client_id'] )
+--     --ngx.log(ngx.INFO, "Am I the one who authorized the use of this token?")
+--     if ngx.var.domain  ~=  myDomain  then
+--       return  requestError(ngx.HTTP_UNAUTHORIZED,'insufficient_scope', 'you are not me')
+--     end
+--     ngx.log(ngx.INFO, 'Yep! ' .. ngx.var.domain .. ' same domain as '  .. myDomain   )
+--   else
+--     msg = " - failed response has no body "
+--     return requestError(ngx.HTTP_UNAUTHORIZED,'unauthorized', msg )
+--   end
+--end
 
 local function verifyAtTokenEndpoint( )
   ngx.log(ngx.INFO, " Verify At Token Endpoint ")
@@ -350,9 +350,9 @@ local function verifyAtTokenEndpoint( )
 _M.extractDomain =  extractDomain
 _M.extractToken =  extractToken
 _M.isTokenValid =  isTokenValid
-_M.indieLoginVerifyAuthorizationCode = indieLoginVerifyAuthorizationCode
+-- _M.indieLoginVerifyAuthorizationCode = indieLoginVerifyAuthorizationCode
 
-function _M.verifyToken()
+function _M.verifytoken()
   ngx.log(ngx.INFO, "Verify Token")
   local msg = ''
   local tokens = ngx.shared.dTokens
@@ -395,22 +395,37 @@ function _M.verifyToken()
   end
 end
 
-return _M
+-- function _M.verifyHubSignature()
+--   ngx.log(ngx.INFO, "Verify X Hub Signature")
+--   local msg = ''
+-- end
 
-  --   ngx.say( myDomain )
-  --   ngx.say(args['issued_by'])
-  --   ngx.say(args['client_id'])
-  --   ngx.say(args['issued_at'])
-  --   ngx.say(args['scope'])
-  --   ngx.say(args['nonce'])
-  --   ngx.say(myURL)
-    -- ngx.say(ngx.var.uri)
-    -- ngx.say(ngx.var.server_name)
-    -- ngx.say(ngx.var.server_addr)
-    -- ngx.say(ngx.var.domain)
-    -- ngx.say(ngx.var.realpath_root)
-    -- ngx.say(ngx.var.host)
-    -- ngx.say(ngx.var.https)
-    -- ngx.say(ngx.var.request)
-    -- ngx.say(ngx.var.request_uri)
-    -- ngx.say(ngx.var.scheme)
+function _M.verifyMyToken()
+  ngx.log(ngx.INFO, "Verify my token")
+  local token = extractToken()
+  ngx.say( 'token: ' .. token)
+  local jwtObj = jwt:load_jwt(token)
+  ngx.log(ngx.INFO, "Check The Tokens Validity")
+  if not jwtObj.valid then
+    return  requestError(ngx.HTTP_UNAUTHORIZED,'insufficient_scope', 'not a jwt token')
+  end
+ ngx.log(ngx.INFO, 'YEP! looks like a JWT token ')
+  local common_name = jwtObj.payload.common_name
+  if common_name == nil then
+    return  requestError(ngx.HTTP_UNAUTHORIZED,'insufficient_scope', 'common_name')
+  end
+  local exist_auth_hash = jwtObj.payload.exist_auth_hash
+  if exist_auth_hash == nil then
+    return  requestError(ngx.HTTP_UNAUTHORIZED,'insufficient_scope', 'exist_auth_hash')
+  end
+
+  if  jwtObj.payload.exist_auth_hash == ngx.md5(ngx.var.exAuth) then
+    ngx.say( ' OK ')
+  else
+    ngx.say ('not OK')
+    return  requestError(ngx.HTTP_UNAUTHORIZED,'has check failed', 'exist_auth_hash')
+  end
+
+end
+
+return _M

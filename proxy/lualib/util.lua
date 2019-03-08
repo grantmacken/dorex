@@ -5,7 +5,7 @@ local cjson = require("cjson")
 
 _M.version = '0.0.1'
 
-local function tablelength(T)
+local function tableLength(T)
   local count = 0
   for _ in pairs(T) do
     count = count + 1
@@ -101,7 +101,8 @@ end
 -- @see https://github.com/pintsized/lua-resty-http
 -- @param URL
 -- @returns  response table , err
---]] function _M.fetch(
+--]] 
+function _M.fetch(
   url)
   ngx.log(ngx.INFO, " FETCH simple GET ")
   ngx.log(ngx.INFO, " - fetch: " .. url)
@@ -168,5 +169,45 @@ end
 end
 
 _M.contains = contains
-_M.tablelength = tablelength
+_M.tablelength = tableLength
+_M.tableLength = tableLength
+
+function _M.doPutXML( sPath , xBody )
+  local sAddress, sMsg = req.getAddress( 'ex' )
+  local sConnect = req.connect( sAddress, 8080 )
+  local tHeaders = {}
+  tHeaders["Content-Type"] =  'application/xml'
+  tHeaders["Authorization"] = 'Basic ' .. sAuth
+  local tRequest = {
+    method = 'PUT',
+    path = sPath,
+    headers = tHeaders,
+    ssl_verify = false,
+    body =  xBody
+   }
+  req.http:set_timeout(3000)
+  local response, err = req.http:request( tRequest )
+  ngx.say( " - response status: " .. response.status)
+  ngx.say( " - response reason: " .. response.reason)
+end
+
+function _M.doGetXML( sPath )
+  local sAddress, sMsg = req.getAddress( 'ex' )
+  local sConnect = req.connect( sAddress, 8080 )
+  local tHeaders = {}
+  tHeaders["Content-Type"] =  'application/xml'
+  tHeaders["Authorization"] = 'Basic ' .. sAuth
+  local tRequest = {
+    method = 'GET',
+    path = sPath,
+    headers = tHeaders,
+    ssl_verify = false,
+   }
+  req.http:set_timeout(3000)
+  local response, err = req.http:request( tRequest )
+  return response:read_body()
+end
+
+
+
 return _M

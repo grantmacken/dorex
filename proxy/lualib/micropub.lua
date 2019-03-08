@@ -6,7 +6,8 @@ _M.version = '0.0.1'
 local util = require("grantmacken.util")
 local req = require("grantmacken.req")
 local reqargs = require("resty.reqargs")
-
+local say = ngx.say
+local exit = ngx.exit
 
 --[[
 https://www.w3.org/TR/micropub/#update
@@ -121,66 +122,54 @@ local function discoverPostType(props)
  return kindOfPost
 end
 
-local function b60Encode(remaining)
-  local chars = '0123456789ABCDEFGHJKLMNPQRSTUVWXYZ_abcdefghijkmnopqrstuvwxyz'
-  local slug = ''
-  --local remaining = tonumber(str)
-  while (remaining > 0) do
-    local d = (remaining % 60)
-    local character = string.sub(chars, d + 1, d + 1)
-    slug = character .. slug
-    remaining = (remaining - d) / 60
-  end
-  return slug
-end
+local function createArchiveID()
+local sDeclare = [[
+import module namespace newBase60='http://markup.nz/#newBase60';
+]]
 
-local function encodeDate()
-  local shortDate = os.date("%y") .. os.date("%j")
-  local integer = tonumber( shortDate )
-  return b60Encode(integer)
-end
+local sLet = [[
+let $nl := '&#10;'
+let $space := '&#32;'
+let $dateTime := current-dateTime() => adjust-dateTime-to-timezone(xs:dayTimeDuration('PT13H'))
+]]
 
-local function createID( k )
-  local shortKindOfPost = getShortKindOfPost(k)
-  ngx.log(ngx.INFO, 'shortKindOfPost: [ ' .. shortKindOfPost  .. ' ]')
-  local slugDict = ngx.shared.slugDict
-  local count = slugDict:get("count") or 0
-  -- setup count and today
-  if count  == 0 then
-    slugDict:add("count", count)
-    slugDict:add("today", encodeDate())
-  end
-  -- if the same day increment
-  -- otherwise reset today and reset counter
-  if slugDict:get("today") == encodeDate() then
-    -- ngx.say('increment counter')
-    slugDict:incr("count",1)
-    --ngx.say(slugDict:get("count"))
-    --ngx.say(slugDict:get("today"))
-  else
-    -- ngx.say('reset counter')
-    slugDict:replace("today", encodeDate())
-    slugDict:replace("count", 1)
-  end
-  -- TODO! comment out test
-   -- ngx.log(ngx.INFO,  'comment out after test' )
-   -- slugDict:replace("count", 1)
-   -- ngx.log(ngx.INFO,  'COUNT: ' .. slugDict:get("count") )
-  -- ngx.say(slugDict:get("count"))
-  -- ngx.say(slugDict:get("today"))
-  return shortKindOfPost .. slugDict:get("today") .. b60Encode(slugDict:get("count"))
+local sReturn = [[
+concat(
+$dateTime => newBase60:dateToInteger() => newBase60:encode(),
+$dateTime => newBase60:timeToInteger() =>  newBase60:encode()
+)
+]]
+
+local oWrap = {
+  ['sDeclare'] = sDeclare,
+  ['sLet'] = sLet,
+  ['sReturn'] = sReturn
+}
+
+local oReq = {
+  ['path'] = '/exist/rest/db',
+  ['auth'] = ngx.var.exAuth,
+  ['method'] = 'POST',
+  ['contentType'] = 'application/xml',
+  ['data'] = req.eXwrapper(oWrap)
+}
+local res = req.eX(oReq)
+ngx.log(ngx.INFO, ' - eXist response' ,  res.reason )
+local resBody, err = res:read_body()
+if not resBody then
+  local msg = "failed to read data: " .. err
+  return util.requestError(
+    ngx.HTTP_UNAUTHORIZED,
+    'bad request',
+    msg)
+end
+return resBody
 end
 
 function extractID( url )
   -- short urls https://gmack.nz/xxxxx
-  local sID, err = require("ngx.re").split(url, "([na]{1}[0-9A-HJ-NP-Z_a-km-z]{4})")[2]
-  if err then
-    return requestError(
-      ngx.HTTP_SERVICE_UNAVAILABLE,
-      'HTTP service unavailable',
-      'connection failure')
-  end
-  return sID
+  local urlSplit = require("ngx.re").split(url,'/')
+  return urlSplit[util.tablelength( urlSplit ) ]
 end
 
 
@@ -219,14 +208,15 @@ local function createMf2Properties( post )
   --]]
 
   ngx.log(ngx.INFO, ' - from the sent properties - discover the kind of post ')
-  local kindOfPost = discoverPostType( post )
+  local kindOfPost =  discoverPostType( post )
   ngx.log(ngx.INFO, 'kindOfPost: [ ' .. kindOfPost  .. ' ]')
 
   local properties = {}
-  local sID = createID( kindOfPost )
-  local sURL = 'https://' .. ngx.var.domain .. '/' .. sID
+  local sID = createArchiveID()
+  local sURL = 'https://' .. ngx.var.domain .. '/archive/' .. sID
   local sPub, n, err =  ngx.re.sub(ngx.localtime(), " ", "T")
 
+  properties['category'] =  { 'kind:' .. kindOfPost }
   properties['published'] =  { sPub }
   properties['uid'] =  { sID  }
   properties['url'] = { sURL }
@@ -234,7 +224,6 @@ local function createMf2Properties( post )
   ngx.log(ngx.INFO, 'property: published [ ' .. sPub .. ' ]' )
   ngx.log(ngx.INFO, 'property: uid  [ ' .. sID .. ' ]' )
   ngx.log(ngx.INFO, 'property: url  [ ' .. sURL .. ' ]' )
-
   for key, val in pairs( post ) do
     -- ngx.log(ngx.INFO,  'post key: '  .. key  )
     -- ngx.log(ngx.INFO,   type( val ) )
@@ -248,7 +237,8 @@ local function createMf2Properties( post )
         ngx.say('TODO!')
       elseif type(post['content']) == "string" then
         local content = {{
-            ['value'] = post['content']
+            ['value'] = post['content'],
+            ['html'] = require('grantmacken.cmark').markdownToHtml( post['content'])
         }}
         properties['content'] = content
       end
@@ -388,7 +378,7 @@ function doPut( sID, sPath, xmlBody )
    --]]
 end
 
-function sendMicropubRequest( xmlBody  )
+function sendMicropubRequest( xmlBody )
   local sPath  = '/exist/rest/db'
   local sAddress, sMsg = req.getAddress( 'ex' )
   ngx.log(ngx.INFO,  sMsg )
@@ -523,50 +513,74 @@ end
 function removeProperty( uri, property)
   local resource    = extractID( uri )
   local docPath   = '/db/data/' .. ngx.var.domain .. '/docs/posts/' .. resource
-  local xmlBody  = [[
-<query xmlns="http://exist.sourceforge.net/NS/exist" wrap="no">
-<text>
-<![CDATA[
-xquery version "3.1";
-let $path := "]] .. docPath .. [["
-let $document := doc($path)
-return
-if ( exists($document//]] .. property .. [[ ))
-  then ( update delete $document//]] .. property .. [[ )
-  else ( )
-]] ..']]>' .. [[
-</text>
-</query>
-]]
-return sendMicropubRequest( xmlBody )
+  local sDeclare = ''
+  local sLet = [[
+  let $path := "]] .. docPath .. [["
+  let $document := doc($path)
+  ]]
+  local sReturn = [[
+  if ( exists($document//]] .. property .. [[ ))
+    then ( update delete $document//]] .. property .. [[ )
+    else ( )
+  ]]
 end
 
 function removePropertyItem( uri, property, item )
+  -- ngx.log(ngx.INFO, ' - request action removePropertyItem ')
+  -- ngx.log(ngx.INFO, uri)
   local resource    = extractID( uri)
-  local xmlNode =  '<' .. property .. '>' .. item .. '</' .. property .. '>'
+  -- local xmlNode =  '<' .. property .. '>' .. item .. '</' .. property .. '>'
   local docPath   = '/db/data/' .. ngx.var.domain .. '/docs/posts/' .. resource
-  local xmlBody  =   [[
-  <query xmlns="http://exist.sourceforge.net/NS/exist" wrap="no">
-    <text>
-    <![CDATA[
-    xquery version "3.1";
-    let $path := "]] .. docPath .. [["
-    let $document := doc($path)
-    let $item := ']] .. item .. [['
-    return
-    if ( $document/entry/]] .. property .. '[ . = "' .. item .. '" ]' ..  [[ ) then (
-    update delete  $document/entry/]] .. property .. '[ . = "' .. item .. '" ]' ..  [[
-    )
-    else ( )
-    ]] ..']]>' .. [[
-    </text>
-  </query>
-]]
-return sendMicropubRequest( xmlBody )
+  -- ngx.log(ngx.INFO, ' - eXist path ' .. docPath )
+  local sDeclare = ''
+  local sLet = [[
+  let $nl := '&#10;'
+  let $path := ']] .. docPath .. [['
+  let $property := ']] .. property .. [['
+  let $item := ']] .. item .. [['
+  let $path := ']] .. docPath .. [['
+  let $document :=  doc($path)
+  let $node := $document/entry/*[ local-name() = 'category' ][. = $item  ]
+  ]]
+  local sReturn = [[
+   if ( $node ) then ( update delete $node )
+   else ()
+  ]]
+  local oWrap = {
+    ['sDeclare'] = sDeclare,
+    ['sLet'] = sLet,
+    ['sReturn'] = sReturn
+  }
+  local oReq = {
+    ['path'] = '/exist/rest/db',
+    ['auth'] = ngx.var.exAuth,
+    ['method'] = 'POST',
+    ['contentType'] = 'application/xml',
+    ['data'] = req.eXwrapper(oWrap)
+  }
+  local res = req.eX(oReq)
+  ngx.log(ngx.INFO, ' - request response removePropertyItem ')
+  ngx.log(ngx.INFO, ' - eXist response' ,  res.reason )
+  local resBody, err = res:read_body()
+  if not resBody then
+    local msg = "failed to read data: " .. err
+    return util.requestError(
+      ngx.HTTP_UNAUTHORIZED,
+      'bad request',
+      msg)
+  end
+  -- ngx.status  = ngx.HTTP_OK
+  -- ngx.say(resBody )   
+  -- ngx.exit(ngx.status)
+  return req.res({
+      ['status'] = ngx.HTTP_OK,
+      ['msg'] = 'In doc ' .. uri  .. " removed the "  .. property .. ' ' .. item
+    })
 end
 
 function replaceProperty( uri, property, item )
   local resource    = extractID( uri)
+  ngx.log(ngx.INFO,  resource )
   local docPath   = '/db/data/' .. ngx.var.domain .. '/docs/posts/' .. resource
   local xmlNode = ''
   -- TODO only allow certain properties
@@ -818,10 +832,41 @@ function processActions( postType, args )
           -- ngx.log(ngx.INFO, 'keyType:' .. key )
           -- ngx.log(ngx.INFO, 'property:' .. property )
           if type(property) == 'string' then
-            local response = removeProperty( sURL, property)
-            ngx.log(ngx.INFO, "status: ", response.status)
-            ngx.log(ngx.INFO,"reason: ", response.reason)
-            reason = response.reason
+            ngx.log(ngx.INFO, 'property:' .. property )
+            local resource    = extractID( uri )
+            local docPath   = '/db/data/' .. ngx.var.domain .. '/docs/posts/' .. resource
+            ngx.log(ngx.INFO, 'data path' .. docPath)
+            local sDeclare = ''
+            local sLet = [[
+            let $path := "]] .. docPath .. [["
+            let $document := doc($path)
+            ]]
+            local sReturn = [[
+            if ( exists($document//]] .. property .. [[ ))
+              then ( update delete $document//]] .. property .. [[ )
+              else ( )
+            ]]
+          local res = req.eX(oReq)
+          ngx.log(ngx.INFO, ' - eXist response' ,  res.reason )
+          local resBody, err = res:read_body()
+          if not resBody then
+            local msg = "failed to read data: " .. err
+            return util.requestError(
+              ngx.HTTP_UNAUTHORIZED,
+              'bad request',
+              msg)
+          end
+          ngx.status  = ngx.HTTP_OK
+          return req.res({
+                    ['status'] = ngx.HTTP_OK,
+                    ['msg'] = ' eXist reponse [  ]'
+                  })
+
+
+            -- local response = removeProperty( sURL, property)
+            -- ngx.log(ngx.INFO, "status: ", response.status)
+            -- ngx.log(ngx.INFO,"reason: ", response.reason)
+            -- reason = response.reason
           end
         elseif type(key) == 'string' then
           if type(property) == 'table' then
@@ -829,10 +874,8 @@ function processActions( postType, args )
               ngx.log(ngx.INFO, "url: " .. sURL)
               ngx.log(ngx.INFO, "key: " .. key)
               ngx.log(ngx.INFO, "item: " .. item)
-              local response =  removePropertyItem( url, key , item )
-              ngx.log(ngx.INFO, "status: ", response.status)
-              ngx.log(ngx.INFO,"reason: ", response.reason)
-              reason = response.reason
+              ngx.log(ngx.INFO, " - do REMOVE the "  .. key .. ' ' .. item)
+              removePropertyItem( sURL, key , item )
             end
             -- after we have removes properties
           elseif type(property) == 'string' then
@@ -1095,6 +1138,7 @@ local function processPostArgs()
            ['type']  =  'h-' ..  hType,
            ['properties'] = properties
          }
+         say(cjson.encode(jData))
 
          ngx.log(ngx.INFO,  ' - post args serialised as mf2' )
          ngx.log(ngx.INFO,   jData['type'] )
@@ -1201,6 +1245,7 @@ function _M.processRequest()
       'multipart/form-data'
     })
     ngx.log( ngx.INFO, 'Accept Content Type: ' .. contentType )
+   --  ngx.exit(200)
     if contentType  == 'application/x-www-form-urlencoded' then
       processPostArgs()
     elseif contentType  == 'multipart/form-data' then

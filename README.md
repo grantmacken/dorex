@@ -11,9 +11,15 @@ Both openresty and eXistdb run in containers.
 
 openresty is set up as a reverse proxy and gateway for the eXist database.
 
+notes:
+
+I use [gitesem](https://github.com/Clever/gitsem) to create semver tags for this repo
 
 ```
-git ls-remote --sort --tags origin | grep -oP '^.+\Kv.+$' | tail -1 
+# make sure status is clean
+gitsem -m 'WIP ... ' patch
+git push && git push --tags
+git ls-remote --tags origin | grep -oP '^.+\Kv.+$' | tail -1 
 ```
 
 

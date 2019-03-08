@@ -1,5 +1,10 @@
 local _M = {}
-
+local cjson = require("cjson")
+local util = require('grantmacken.util')
+local req = require("grantmacken.req")
+local reqargs = require("resty.reqargs")
+-- local re = require("ngx.re")
+_M.version = '0.0.1'
 --[[
 
 webmention.lua
@@ -36,14 +41,10 @@ NOTE:   orDev for local
    - source not same as target
    - target as valid resource
    - Webmention Verification
-
 https://www.w3.org/TR/webmention/#h-webmention-verification
-
 --]]
 
-local util = require('grantmacken.util')
-local req = require("grantmacken.req")
-local reqargs = require("resty.reqargs")
+
 
 function _M.processRequest()
   ngx.log( ngx.INFO, '============================' )
@@ -154,8 +155,7 @@ function processPostArgs()
       'bad request',
       msg)
   end
-
-  webmentionVerification( args['source'], args['target']  )
+  processWebmention( args['source'], args['target']  )
 end
 
   -- ngx.say( resID )
@@ -174,16 +174,49 @@ end
   --  -  MUST perform an HTTP GET request on source
   --  - SHOULD limit the number of redirects it follows
   --  - receiver SHOULD include an HTTP Accept header 
-function webmentionVerification( source , target )
+function processWebmention( source , target )
   ngx.log(ngx.INFO, ' Webmention Verification ' )
   ngx.log(ngx.INFO, '==========================' )
   ngx.log(ngx.INFO,'MUST perform an HTTP GET request on source' )
-  local response, err = util.fetch( source )
+  local http = req.http
+  local sURL =  source
+  local sHost = http:parse_uri(sURL)[2]
+  local iPort = http:parse_uri(sURL)[3]
+  local sPath = http:parse_uri(sURL)[4]
+  local sResolved
+  if ( sHost == ngx.var.domain ) then
+    sResolved = 'or'
+  else
+    sResolved = sHost
+  end
+  local sAddress, sMsg = req.getAddress( sResolved )
+  local sConnect =  req.connect( sAddress, iPort )
+  if ( iPort == 443 ) then
+    req.handshake( sHost )
+  end
+  local tHeaders = {}
+     tHeaders['Host'] = sHost
+  local tRequest = {}
+    tRequest['method'] = 'GET'
+    tRequest['path'] = sPath
+    tRequest['ssl_verify'] = false
+    tRequest['headers'] = tHeaders
+
+  http:set_timeout(2000)
+  local response, err = http:request(tRequest )
   if not response then
     msg = "source URL not found - failed to complete request: ", err
-    return requestError(ngx.HTTP_BAD_REQUEST,'bad request', msg ) 
+    return requestError(ngx.HTTP_BAD_REQUEST,'bad request', msg )
   end
-  ngx.log(ngx.INFO, " - source response " .. response.reason)
+  if  response.reason ~= 'Not Found' then
+    ngx.log(ngx.INFO, " - source response " .. response.reason)
+  else
+   msg = "source URL not found "
+      return util.requestError(
+        ngx.HTTP_BAD_REQUEST,
+        'HTTP bad request',
+        msg)
+  end
 
   local body = ''
   if response.has_body then
@@ -234,7 +267,6 @@ function webmentionVerification( source , target )
     -- plain text, the receiver should look for the URL by searching for the string.
     -- ngx.log(ngx.INFO, " - initial check is to see if target string is in source body text" )
     ngx.log(ngx.INFO, "source document MUST have an exact match of the target URL")
-
     if findTargetInSource( body , target ) then
        ngx.log(ngx.INFO, " - found target body text in source body text" )
        store(  source, target, body )
@@ -245,7 +277,6 @@ function webmentionVerification( source , target )
         'bad request',
         msg )
     end
-  ngx.exit(200)
   else
     if err then
       local msg =  'source URL not found - ' .. err .. ' - can not proccess ' .. contentTypeHeader
@@ -260,32 +291,25 @@ function webmentionVerification( source , target )
       'bad request ' ,
       msg )
   end
-  -- ngx.say( extractSource( ngx.encode_base64( body ) ))
 end
 
 function store( source, target, body )
-  local config = require('grantmacken.config')
   local domain  = ngx.var.domain
-
   ngx.log(ngx.INFO, "STORE source as a wellformed document" )
   local srcID = createResourceID( source )
   ngx.log(ngx.INFO, " - sourceID is hash of the source URL: " .. srcID )
   local srcCol = 'pages'
   ngx.log(ngx.INFO, " - source will be catched page in the collection: " ..srcCol )
-
-  local httpc = require('resty.http').new()
-  local scheme, host, port, path = unpack(httpc:parse_uri(source))
+  local http = req.http
+  local scheme, host, port, path = unpack(http:parse_uri(source))
   local base = scheme .. '://' .. host
-
   ngx.log(ngx.INFO, " - source base : " .. base)
   local data =  sanitizeStoreSource( ngx.encode_base64( body ), base , domain , srcCol, srcID )
-  ngx.log(ngx.INFO, " - stored source in pages collection")
-
+  ngx.log( ngx.INFO, ' - stored source in '  .. srcCol .. ' collection' )
   local targetID = util.extractID( target )
   if not targetID then
     return false
   end
-
   ngx.log(ngx.INFO, " - targetID is the doc mentioned on my site: " .. targetID )
   local insResponse = insertMention( source, srcID, targetID, domain )
   ngx.log(ngx.INFO, " - mention insert done: " .. targetID )
@@ -301,12 +325,12 @@ function insertMention( source, srcID, targetID, myDomain )
     let $source := "]] .. source .. [["
     let $srcPath := "xmldb:exist:///db/data/]] .. myDomain  .. '/docs/pages/' ..  srcID .. [["
     let $srcDoc := doc( $srcPath )
-    let $mf2Parsed := mf2:dispatch( $srcDoc/node())
+    let $mf2Parsed := mf2:dispatch( $srcDoc/node() )
     let $mention := if ( $srcDoc instance of document-node() ) then (
     <mention><source>{$source}</source>{$mf2Parsed}</mention>
     )
     else (
-    <mention><source>{$source}</source></mention> 
+    <mention><source>{$source}</source></mention>
     )
     let $collection := "xmldb:exist:///db/data/]] .. myDomain  .. '/docs/mentions/' .. [["
     let $resource := "]] .. targetID .. [["
@@ -330,12 +354,12 @@ function insertMention( source, srcID, targetID, myDomain )
     </text>
   </query>
 ]]
-  local responseBody =  require('grantmacken.eXist').restQuery( txt )
+
+  local responseBody = postQuery( txt )
   ngx.log(ngx.INFO, "body: ", responseBody)
 end
 
 -- return mf2:dispatch($sanDoc)
-
 function sanitizeStoreSource( srcBinary, srcBase, myDomain, srcCol, srcID )
   local restPath  = '/exist/rest/db'
   local txt  =   [[
@@ -350,7 +374,7 @@ function sanitizeStoreSource( srcBinary, srcBase, myDomain, srcCol, srcID )
     let $sanDoc := muSan:sanitizer( $srcDoc/* , $base )
     let $collection := "xmldb:exist:///db/data/]] .. myDomain  .. '/docs/' .. srcCol .. [["
     let $resource := "]] .. srcID .. [["
-    return xmldb:store( $collection, $resource, $sanDoc, 'application.xml' ) 
+    return xmldb:store( $collection, $resource, $sanDoc, 'application.xml' )
     }
     catch *{()}
      ]] ..']]>' .. [[
@@ -359,10 +383,9 @@ function sanitizeStoreSource( srcBinary, srcBase, myDomain, srcCol, srcID )
 ]]
   --  ngx.log(ngx.INFO, 'constructed txt')
   --  ngx.say(txt)
-  local responseBody =  require('grantmacken.eXist').restQuery( txt )
+  local responseBody = postQuery( txt )
   ngx.log(ngx.INFO, "body: ", responseBody)
   ngx.log(ngx.INFO, "body: ", type( responseBody))
-
   return responseBody
 end
 
@@ -416,7 +439,6 @@ function isValidResource( url )
 end
 
 function createResourceID( str )
-  local config = require('grantmacken.config')
   local domain  = ngx.var.domain
   local restPath  = '/exist/rest/db'
   local txt  =   [[
@@ -433,10 +455,17 @@ function createResourceID( str )
 ]]
   --  ngx.log(ngx.INFO, 'constructed txt')
   --  ngx.say(txt)
-  local responseBody =  require('grantmacken.eXist').restQuery( txt )
   -- ngx.log(ngx.INFO, "body: ", responseBody)
   --ngx.log(ngx.INFO, "body: ", type( responseBody))
-  return responseBody
+  --
+  -- expect string
+  return postQuery( txt )
+  -- if exResult == 'true' then
+  --   return true
+  -- else
+  --   return false
+  -- end
+
 end
 
 function isURL( url )
